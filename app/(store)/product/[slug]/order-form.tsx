@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -9,17 +9,8 @@ import { createOrder } from "@/lib/actions/orders";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Form,
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@/components/ui/form";
 import { toast } from "sonner";
-import { Loader2, Minus, Plus, ShoppingCart, CreditCard } from "lucide-react";
+import { Loader2, Minus, Plus } from "lucide-react";
 
 const orderFormSchema = z.object({
   quantity: z.number().int().min(1),
@@ -55,7 +46,6 @@ export function OrderForm({
 }: OrderFormProps) {
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
-
   const effectiveMax = Math.min(maxQuantity, stock);
 
   const form = useForm<OrderFormValues>({
@@ -70,6 +60,7 @@ export function OrderForm({
 
   const quantity = form.watch("quantity");
   const totalPrice = (price * quantity).toFixed(2);
+  const errors = form.formState.errors;
 
   const updateQuantity = (delta: number) => {
     const newValue = quantity + delta;
@@ -94,13 +85,11 @@ export function OrderForm({
         });
 
         if (result.paymentForm) {
-          // 创建隐藏表单并 POST 提交到支付网关
           const form = document.createElement("form");
           form.method = "POST";
           form.action = result.paymentForm.actionUrl;
           form.style.display = "none";
 
-          // 添加所有参数为隐藏字段
           Object.entries(result.paymentForm.params).forEach(([key, value]) => {
             const input = document.createElement("input");
             input.type = "hidden";
@@ -112,7 +101,6 @@ export function OrderForm({
           document.body.appendChild(form);
           form.submit();
         } else {
-          // 跳转到订单结果页
           router.push(`/order/result?orderNo=${result.orderNo}`);
         }
       } else {
@@ -124,150 +112,110 @@ export function OrderForm({
   };
 
   return (
-    <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-        {/* Quantity */}
-        <div className="space-y-3">
-          <Label className="text-base">购买数量</Label>
-          <div className="flex items-center gap-4">
-            <div className="flex items-center rounded-lg border border-zinc-200 dark:border-zinc-800">
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-10 w-10 rounded-r-none"
-                onClick={() => updateQuantity(-1)}
-                disabled={quantity <= minQuantity}
-              >
-                <Minus className="h-4 w-4" />
-              </Button>
-              <Input
-                type="number"
-                className="h-10 w-16 border-0 text-center [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                value={quantity}
-                onChange={(e) => {
-                  const val = parseInt(e.target.value);
-                  if (!isNaN(val) && val >= minQuantity && val <= effectiveMax) {
-                    form.setValue("quantity", val);
-                  }
-                }}
-              />
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-10 w-10 rounded-l-none"
-                onClick={() => updateQuantity(1)}
-                disabled={quantity >= effectiveMax}
-              >
-                <Plus className="h-4 w-4" />
-              </Button>
-            </div>
-            <span className="text-sm text-zinc-500">
-              限购 {minQuantity}-{effectiveMax} 件
-            </span>
+    <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+      {/* Quantity */}
+      <div className="space-y-2">
+        <Label>数量</Label>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center rounded-md border">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 rounded-r-none"
+              onClick={() => updateQuantity(-1)}
+              disabled={quantity <= minQuantity}
+            >
+              <Minus className="h-4 w-4" />
+            </Button>
+            <Input
+              type="number"
+              className="h-9 w-14 border-0 text-center [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              value={quantity}
+              onChange={(e) => {
+                const val = parseInt(e.target.value);
+                if (!isNaN(val) && val >= minQuantity && val <= effectiveMax) {
+                  form.setValue("quantity", val);
+                }
+              }}
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 rounded-l-none"
+              onClick={() => updateQuantity(1)}
+              disabled={quantity >= effectiveMax}
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
           </div>
+          <span className="text-sm text-muted-foreground">
+            限购 {minQuantity}-{effectiveMax} 件
+          </span>
         </div>
+      </div>
 
-        {/* Email */}
-        <FormField
-          control={form.control}
-          name="email"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel className="text-base">联系邮箱</FormLabel>
-              <FormControl>
-                <Input
-                  type="email"
-                  placeholder="your@email.com"
-                  className="h-11"
-                  {...field}
-                />
-              </FormControl>
-              <FormDescription>用于接收订单通知和卡密信息</FormDescription>
-              <FormMessage />
-            </FormItem>
-          )}
+      {/* Email */}
+      <div className="space-y-2">
+        <Label htmlFor="email">联系邮箱</Label>
+        <Input
+          id="email"
+          type="email"
+          placeholder="your@email.com"
+          {...form.register("email")}
         />
+        {errors.email && (
+          <p className="text-sm text-destructive">{errors.email.message}</p>
+        )}
+        <p className="text-xs text-muted-foreground">用于接收卡密信息</p>
+      </div>
 
-        {/* Query Password */}
-        <FormField
-          control={form.control}
-          name="queryPassword"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel className="text-base">查询密码</FormLabel>
-              <FormControl>
-                <Input
-                  type="password"
-                  placeholder="设置6-32位查询密码"
-                  className="h-11"
-                  {...field}
-                />
-              </FormControl>
-              <FormDescription>用于查询订单和提取卡密</FormDescription>
-              <FormMessage />
-            </FormItem>
+      {/* Password */}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-2">
+          <Label htmlFor="queryPassword">查询密码</Label>
+          <Input
+            id="queryPassword"
+            type="password"
+            placeholder="6-32位密码"
+            {...form.register("queryPassword")}
+          />
+          {errors.queryPassword && (
+            <p className="text-sm text-destructive">{errors.queryPassword.message}</p>
           )}
-        />
-
-        {/* Confirm Password */}
-        <FormField
-          control={form.control}
-          name="confirmPassword"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel className="text-base">确认密码</FormLabel>
-              <FormControl>
-                <Input
-                  type="password"
-                  placeholder="再次输入查询密码"
-                  className="h-11"
-                  {...field}
-                />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-
-        {/* Total */}
-        <div className="rounded-xl border border-violet-200 bg-gradient-to-r from-violet-50 to-indigo-50 p-4 dark:border-violet-900 dark:from-violet-950 dark:to-indigo-950">
-          <div className="flex items-center justify-between">
-            <span className="text-zinc-600 dark:text-zinc-400">
-              {productName} × {quantity}
-            </span>
-            <span className="text-2xl font-bold text-violet-600 dark:text-violet-400">
-              ¥{totalPrice}
-            </span>
-          </div>
         </div>
+        <div className="space-y-2">
+          <Label htmlFor="confirmPassword">确认密码</Label>
+          <Input
+            id="confirmPassword"
+            type="password"
+            placeholder="再次输入"
+            {...form.register("confirmPassword")}
+          />
+          {errors.confirmPassword && (
+            <p className="text-sm text-destructive">{errors.confirmPassword.message}</p>
+          )}
+        </div>
+      </div>
 
-        {/* Submit */}
-        <Button
-          type="submit"
-          size="lg"
-          className="w-full h-12 text-base font-semibold bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700"
-          disabled={isPending}
-        >
+      {/* Total & Submit */}
+      <div className="flex items-center justify-between pt-2">
+        <div>
+          <span className="text-sm text-muted-foreground">{productName} × {quantity}</span>
+          <div className="text-xl font-bold">¥{totalPrice}</div>
+        </div>
+        <Button type="submit" disabled={isPending}>
           {isPending ? (
             <>
-              <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-              处理中...
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              处理中
             </>
           ) : (
-            <>
-              <CreditCard className="mr-2 h-5 w-5" />
-              立即购买
-            </>
+            "立即购买"
           )}
         </Button>
-
-        <p className="text-center text-xs text-zinc-500">
-          点击购买即表示您同意我们的服务条款
-        </p>
-      </form>
-    </Form>
+      </div>
+    </form>
   );
 }
-

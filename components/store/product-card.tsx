@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
+import { ChevronRight } from "lucide-react";
 
 interface ProductCardProps {
   id: string;
@@ -22,7 +22,6 @@ interface ProductCardProps {
 export function ProductCard({
   name,
   slug,
-  description,
   price,
   originalPrice,
   stock,
@@ -33,48 +32,42 @@ export function ProductCard({
   const hasDiscount = originalPrice && parseFloat(originalPrice) > parseFloat(price);
 
   return (
-    <Link href={`/product/${slug}`}>
-      <Card className="h-full transition-colors hover:bg-muted/50">
-        <CardContent className="p-4">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0 flex-1">
-              {category && (
-                <p className="text-xs text-muted-foreground">{category.name}</p>
-              )}
-              <h3 className="font-medium leading-snug line-clamp-2">{name}</h3>
-              {description && (
-                <p className="mt-1 text-sm text-muted-foreground line-clamp-1">
-                  {description}
-                </p>
-              )}
-            </div>
-            <div className="flex flex-col items-end gap-1">
-              {isFeatured && (
-                <Badge variant="secondary" className="text-xs">
-                  热门
-                </Badge>
-              )}
-              {isOutOfStock && (
-                <Badge variant="outline" className="text-xs text-muted-foreground">
-                  售罄
-                </Badge>
-              )}
-            </div>
-          </div>
+    <Link
+      href={`/product/${slug}`}
+      className="flex items-center justify-between gap-4 p-4 transition-colors hover:bg-muted/50"
+    >
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="font-medium truncate">{name}</span>
+          {isFeatured && (
+            <Badge variant="secondary" className="shrink-0 text-xs">
+              热门
+            </Badge>
+          )}
+          {isOutOfStock && (
+            <Badge variant="outline" className="shrink-0 text-xs text-muted-foreground">
+              售罄
+            </Badge>
+          )}
+        </div>
+        <div className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
+          {category && <span>{category.name}</span>}
+          {category && <span>·</span>}
+          <span>库存 {stock}</span>
+        </div>
+      </div>
 
-          <div className="mt-3 flex items-baseline justify-between">
-            <div className="flex items-baseline gap-1.5">
-              <span className="text-lg font-semibold">¥{price}</span>
-              {hasDiscount && (
-                <span className="text-sm text-muted-foreground line-through">
-                  ¥{originalPrice}
-                </span>
-              )}
+      <div className="flex items-center gap-3 shrink-0">
+        <div className="text-right">
+          <div className="font-semibold">¥{price}</div>
+          {hasDiscount && (
+            <div className="text-xs text-muted-foreground line-through">
+              ¥{originalPrice}
             </div>
-            <span className="text-xs text-muted-foreground">库存 {stock}</span>
-          </div>
-        </CardContent>
-      </Card>
+          )}
+        </div>
+        <ChevronRight className="h-4 w-4 text-muted-foreground" />
+      </div>
     </Link>
   );
 }
