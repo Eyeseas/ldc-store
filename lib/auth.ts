@@ -55,7 +55,9 @@ const LinuxDoProvider = {
     trust_level?: number;
     silenced?: boolean;
   }) {
-    console.log("[LinuxDoProvider] profile 原始数据:", JSON.stringify(profile, null, 2));
+    if (process.env.NODE_ENV === "development") {
+      console.log("[LinuxDoProvider] profile 原始数据:", JSON.stringify(profile, null, 2));
+    }
     
     // 处理头像URL模板，替换 {size} 为实际尺寸
     const avatarUrl = profile.avatar_template
@@ -73,7 +75,9 @@ const LinuxDoProvider = {
       silenced: profile.silenced,
     };
     
-    console.log("[LinuxDoProvider] profile 返回数据:", JSON.stringify(result, null, 2));
+    if (process.env.NODE_ENV === "development") {
+      console.log("[LinuxDoProvider] profile 返回数据:", JSON.stringify(result, null, 2));
+    }
     return result;
   },
 };
@@ -122,8 +126,10 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   callbacks: {
     async jwt({ token, user, account }) {
       if (user) {
-        console.log("[JWT Callback] user:", JSON.stringify(user, null, 2));
-        console.log("[JWT Callback] account provider:", account?.provider);
+        if (process.env.NODE_ENV === "development") {
+          console.log("[JWT Callback] user:", JSON.stringify(user, null, 2));
+          console.log("[JWT Callback] account provider:", account?.provider);
+        }
         
         token.id = user.id;
         token.role = (user as { role?: string }).role;
@@ -140,13 +146,15 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           const adminUsernames = getAdminUsernames();
           if (username && adminUsernames.includes(username)) {
             token.role = "admin";
-            console.log("[JWT Callback] OAuth 用户在管理员白名单中:", username);
-          } else {
-            console.log("[JWT Callback] OAuth 用户不在管理员白名单中:", username);
+            if (process.env.NODE_ENV === "development") {
+              console.log("[JWT Callback] OAuth 用户在管理员白名单中:", username);
+            }
           }
         }
         
-        console.log("[JWT Callback] token:", JSON.stringify(token, null, 2));
+        if (process.env.NODE_ENV === "development") {
+          console.log("[JWT Callback] token:", JSON.stringify(token, null, 2));
+        }
       }
       return token;
     },

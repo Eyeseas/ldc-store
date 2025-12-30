@@ -8,6 +8,7 @@ import { createOrderSchema, type CreateOrderInput } from "@/lib/validations/orde
 import { createPayment, type PaymentFormData } from "@/lib/payment/ldc";
 import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
+import { requireAdmin } from "@/lib/auth-utils";
 
 /**
  * 从请求头自动获取网站 URL
@@ -301,6 +302,12 @@ export async function adminCompleteOrder(
   adminRemark?: string
 ): Promise<{ success: boolean; message: string }> {
   try {
+    await requireAdmin();
+  } catch {
+    return { success: false, message: "需要管理员权限" };
+  }
+
+  try {
     await db.transaction(async (tx) => {
       // 1. 更新订单状态
       const [order] = await tx
@@ -359,13 +366,9 @@ export async function getUserOrders() {
     const session = await auth();
     const user = session?.user as { id?: string; username?: string; provider?: string } | undefined;
 
-    console.log("[getUserOrders] session.user:", JSON.stringify(user, null, 2));
-
     if (!user?.id || user.provider !== "linux-do") {
       return { success: false, message: "请先登录", data: [] };
     }
-
-    console.log("[getUserOrders] 查询用户订单, userId:", user.id, "username:", user.username);
 
     const userOrders = await db.query.orders.findMany({
       where: eq(orders.userId, user.id),
@@ -380,8 +383,6 @@ export async function getUserOrders() {
       },
       orderBy: [desc(orders.createdAt)],
     });
-
-    console.log("[getUserOrders] 查询到订单数量:", userOrders.length);
 
     const ordersWithCards = userOrders.map((order) => {
       // 仅当订单已完成时才显示卡密

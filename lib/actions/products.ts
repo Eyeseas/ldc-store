@@ -9,6 +9,7 @@ import {
   type CreateProductInput,
   type UpdateProductInput,
 } from "@/lib/validations/product";
+import { requireAdmin } from "@/lib/auth-utils";
 
 // 节流：最多每 60 秒检查一次过期订单
 let lastExpireCheck = 0;
@@ -253,6 +254,12 @@ export async function getAllProducts(options?: {
  * 创建商品
  */
 export async function createProduct(input: CreateProductInput) {
+  try {
+    await requireAdmin();
+  } catch {
+    return { success: false, message: "需要管理员权限" };
+  }
+
   const validationResult = createProductSchema.safeParse(input);
   if (!validationResult.success) {
     return {
@@ -290,6 +297,12 @@ export async function createProduct(input: CreateProductInput) {
  * 更新商品
  */
 export async function updateProduct(id: string, input: UpdateProductInput) {
+  try {
+    await requireAdmin();
+  } catch {
+    return { success: false, message: "需要管理员权限" };
+  }
+
   const validationResult = updateProductSchema.safeParse(input);
   if (!validationResult.success) {
     return {
@@ -343,6 +356,12 @@ export async function updateProduct(id: string, input: UpdateProductInput) {
  */
 export async function deleteProduct(id: string) {
   try {
+    await requireAdmin();
+  } catch {
+    return { success: false, message: "需要管理员权限" };
+  }
+
+  try {
     // 检查是否有未完成的订单
     const hasActiveOrders = await db.query.orders.findFirst({
       where: and(
@@ -374,6 +393,12 @@ export async function deleteProduct(id: string) {
  * 切换商品上架状态
  */
 export async function toggleProductActive(id: string) {
+  try {
+    await requireAdmin();
+  } catch {
+    return { success: false, message: "需要管理员权限" };
+  }
+
   try {
     const product = await db.query.products.findFirst({
       where: eq(products.id, id),

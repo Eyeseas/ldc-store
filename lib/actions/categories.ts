@@ -9,6 +9,7 @@ import {
   type CreateCategoryInput,
   type UpdateCategoryInput,
 } from "@/lib/validations/category";
+import { requireAdmin } from "@/lib/auth-utils";
 
 /**
  * 获取所有分类（前台）
@@ -63,6 +64,12 @@ export async function getCategoryBySlug(slug: string) {
  * 创建分类
  */
 export async function createCategory(input: CreateCategoryInput) {
+  try {
+    await requireAdmin();
+  } catch {
+    return { success: false, message: "需要管理员权限" };
+  }
+
   const validationResult = createCategorySchema.safeParse(input);
   if (!validationResult.success) {
     return {
@@ -94,6 +101,12 @@ export async function createCategory(input: CreateCategoryInput) {
  * 更新分类
  */
 export async function updateCategory(id: string, input: UpdateCategoryInput) {
+  try {
+    await requireAdmin();
+  } catch {
+    return { success: false, message: "需要管理员权限" };
+  }
+
   const validationResult = updateCategorySchema.safeParse(input);
   if (!validationResult.success) {
     return {
@@ -134,6 +147,12 @@ export async function updateCategory(id: string, input: UpdateCategoryInput) {
  */
 export async function deleteCategory(id: string) {
   try {
+    await requireAdmin();
+  } catch {
+    return { success: false, message: "需要管理员权限" };
+  }
+
+  try {
     // 检查是否有商品使用该分类
     const productCount = await db
       .select({ count: sql<number>`count(*)::int` })
@@ -163,6 +182,12 @@ export async function deleteCategory(id: string) {
  * 切换分类状态
  */
 export async function toggleCategoryActive(id: string) {
+  try {
+    await requireAdmin();
+  } catch {
+    return { success: false, message: "需要管理员权限" };
+  }
+
   try {
     const category = await db.query.categories.findFirst({
       where: eq(categories.id, id),

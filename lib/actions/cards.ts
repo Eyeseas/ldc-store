@@ -4,11 +4,18 @@ import { db, cards, products } from "@/lib/db";
 import { eq, and, sql, inArray, desc, asc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { importCardsSchema, type ImportCardsInput } from "@/lib/validations/card";
+import { requireAdmin } from "@/lib/auth-utils";
 
 /**
  * 批量导入卡密
  */
 export async function importCards(input: ImportCardsInput) {
+  try {
+    await requireAdmin();
+  } catch {
+    return { success: false, message: "需要管理员权限" };
+  }
+
   const validationResult = importCardsSchema.safeParse(input);
   if (!validationResult.success) {
     return {
@@ -150,6 +157,12 @@ export async function getCardStats(productId: string) {
  * 删除卡密
  */
 export async function deleteCards(cardIds: string[]) {
+  try {
+    await requireAdmin();
+  } catch {
+    return { success: false, message: "需要管理员权限" };
+  }
+
   if (cardIds.length === 0) {
     return { success: false, message: "请选择要删除的卡密" };
   }
@@ -184,6 +197,12 @@ export async function deleteCards(cardIds: string[]) {
  * 重置锁定的卡密（释放锁定状态）
  */
 export async function resetLockedCards(cardIds: string[]) {
+  try {
+    await requireAdmin();
+  } catch {
+    return { success: false, message: "需要管理员权限" };
+  }
+
   if (cardIds.length === 0) {
     return { success: false, message: "请选择要重置的卡密" };
   }
@@ -225,6 +244,12 @@ export async function exportCards(
   productId: string,
   status?: "available" | "sold" | "locked"
 ) {
+  try {
+    await requireAdmin();
+  } catch {
+    return [];
+  }
+
   const conditions = [eq(cards.productId, productId)];
   if (status) {
     conditions.push(eq(cards.status, status));
@@ -249,6 +274,12 @@ export async function exportCards(
  * 保留最早创建的那个
  */
 export async function cleanDuplicateCards(productId: string) {
+  try {
+    await requireAdmin();
+  } catch {
+    return { success: false, message: "需要管理员权限" };
+  }
+
   try {
     // 找出重复的卡密
     const duplicates = await db.execute(sql`
