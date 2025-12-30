@@ -147,8 +147,6 @@ pnpm dev
 | `NEXT_PUBLIC_SITE_DESCRIPTION` | ❌ | - | 网站描述（用于 SEO）|
 | `ORDER_EXPIRE_MINUTES` | ❌ | `30` | 订单过期时间（分钟）|
 
-> 💡 **提示**: 在 Vercel 部署时，`vercel.json` 已预设了有默认值的变量，你只需配置必填项。
-
 ## 📝 Linux DO Credit 配置
 
 1. 访问 [Linux DO Credit 控制台](https://credit.linux.do)
