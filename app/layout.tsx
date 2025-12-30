@@ -12,12 +12,15 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const siteName = process.env.NEXT_PUBLIC_SITE_NAME || "LDC Store";
+const siteDescription = process.env.NEXT_PUBLIC_SITE_DESCRIPTION || "基于 Linux DO Credit 的虚拟商品自动发卡平台";
+
 export const metadata: Metadata = {
   title: {
-    default: "LDC Store - 自动发卡系统",
-    template: "%s | LDC Store",
+    default: `${siteName} - 自动发卡系统`,
+    template: `%s | ${siteName}`,
   },
-  description: "基于 Linux DO Credit 的虚拟商品自动发卡平台",
+  description: siteDescription,
   keywords: ["自动发卡", "虚拟商品", "Linux DO", "LDC"],
 };
 

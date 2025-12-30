@@ -42,7 +42,13 @@ pnpm install
 
 ### 2. 配置环境变量
 
-创建 `.env` 文件：
+复制环境变量样例文件并修改：
+
+```bash
+cp .env.example .env
+```
+
+编辑 `.env` 文件，填写实际配置值：
 
 ```env
 # 数据库 (推荐 Neon: https://neon.tech)
@@ -60,8 +66,15 @@ LDC_PID="your_client_id"
 LDC_SECRET="your_client_secret"
 LDC_GATEWAY="https://credit.linux.do/epay"
 
-# 网站名称（可选）
+# Linux DO OAuth2 登录（可选）
+LINUXDO_CLIENT_ID="your_linuxdo_client_id"
+LINUXDO_CLIENT_SECRET="your_linuxdo_client_secret"
+
+# 网站名称（可选，显示在 Header 标题和页面标题中）
 NEXT_PUBLIC_SITE_NAME="LDC Store"
+
+# 网站描述（可选）
+NEXT_PUBLIC_SITE_DESCRIPTION="基于 Linux DO Credit 的虚拟商品自动发卡平台"
 
 # 订单过期时间（分钟）
 ORDER_EXPIRE_MINUTES=30
@@ -101,7 +114,14 @@ pnpm dev
 | `LDC_PID` | ⚠️ | Linux DO Credit Client ID |
 | `LDC_SECRET` | ⚠️ | Linux DO Credit Secret |
 | `LDC_GATEWAY` | ❌ | 支付网关地址（默认官方地址）|
-| `NEXT_PUBLIC_SITE_NAME` | ❌ | 网站名称 |
+| `LINUXDO_CLIENT_ID` | ❌ | Linux DO OAuth2 Client ID |
+| `LINUXDO_CLIENT_SECRET` | ❌ | Linux DO OAuth2 Client Secret |
+| `NEXT_PUBLIC_LINUXDO_ENABLED` | ❌ | 是否在登录页显示 OAuth 按钮（设置为 "true" 启用）|
+| `LINUXDO_AUTHORIZATION_URL` | ❌ | OAuth2 授权端点（默认官方地址）|
+| `LINUXDO_TOKEN_URL` | ❌ | OAuth2 Token 端点（默认官方地址）|
+| `LINUXDO_USERINFO_URL` | ❌ | OAuth2 用户信息端点（默认官方地址）|
+| `NEXT_PUBLIC_SITE_NAME` | ❌ | 网站名称（显示在 Header 标题和页面标题中）|
+| `NEXT_PUBLIC_SITE_DESCRIPTION` | ❌ | 网站描述（用于 SEO meta 标签）|
 | `ORDER_EXPIRE_MINUTES` | ❌ | 订单过期时间（默认30分钟）|
 
 ## 📝 Linux DO Credit 配置
@@ -111,6 +131,52 @@ pnpm dev
 3. 配置回调地址:
    - **Notify URL:** `https://your-domain.com/api/payment/notify`
    - **Return URL:** `https://your-domain.com/order/result`
+
+## 🔑 Linux DO OAuth2 登录配置
+
+支持用户使用 Linux DO 账号登录，获取用户信息。
+
+### 申请接入
+
+1. 访问 [Linux DO Connect](https://connect.linux.do) 控制台
+2. 点击 **我的应用接入** - **申请新接入**
+3. 填写应用信息，**回调地址** 填写：`https://your-domain.com/api/auth/callback/linux-do`
+4. 申请成功后获取 `Client ID` 和 `Client Secret`
+
+### 环境变量配置
+
+在 `.env` 中配置:
+
+```env
+LINUXDO_CLIENT_ID="your_client_id"
+LINUXDO_CLIENT_SECRET="your_client_secret"
+NEXT_PUBLIC_LINUXDO_ENABLED="true"
+```
+
+### 可获取的用户信息
+
+| 字段 | 说明 |
+|------|------|
+| `id` | 用户唯一标识（不可变） |
+| `username` | 论坛用户名 |
+| `name` | 论坛用户昵称（可变） |
+| `avatar_template` | 用户头像模板URL（支持多种尺寸） |
+| `active` | 账号活跃状态 |
+| `trust_level` | 信任等级（0-4） |
+| `silenced` | 禁言状态 |
+
+### OAuth2 端点（默认值，一般无需修改）
+
+| 端点 | 地址 |
+|------|------|
+| 授权端点 | `https://connect.linux.do/oauth2/authorize` |
+| Token 端点 | `https://connect.linux.do/oauth2/token` |
+| 用户信息端点 | `https://connect.linux.do/api/user` |
+
+如需自定义端点地址，可配置以下环境变量：
+- `LINUXDO_AUTHORIZATION_URL`
+- `LINUXDO_TOKEN_URL`
+- `LINUXDO_USERINFO_URL`
 
 ## 📁 项目结构
 

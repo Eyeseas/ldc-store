@@ -17,8 +17,9 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
-import { Loader2, Lock } from "lucide-react";
+import { Loader2, Lock, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
+import { Separator } from "@/components/ui/separator";
 
 const loginSchema = z.object({
   password: z.string().min(1, "请输入密码"),
@@ -26,8 +27,12 @@ const loginSchema = z.object({
 
 type LoginFormValues = z.infer<typeof loginSchema>;
 
+// 检查是否启用了 Linux DO OAuth2 登录
+const LINUXDO_ENABLED = process.env.NEXT_PUBLIC_LINUXDO_ENABLED === "true";
+
 function LoginForm() {
   const [isLoading, setIsLoading] = useState(false);
+  const [isOAuthLoading, setIsOAuthLoading] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get("callbackUrl") || "/admin";
@@ -66,6 +71,18 @@ function LoginForm() {
     }
   };
 
+  const handleLinuxDoLogin = async () => {
+    setIsOAuthLoading(true);
+    try {
+      await signIn("linux-do", { callbackUrl });
+    } catch {
+      toast.error("登录失败", {
+        description: "OAuth 登录发生错误",
+      });
+      setIsOAuthLoading(false);
+    }
+  };
+
   return (
     <Card className="w-full max-w-md">
       <CardHeader className="text-center">
@@ -100,7 +117,7 @@ function LoginForm() {
             <Button
               type="submit"
               className="w-full h-11"
-              disabled={isLoading}
+              disabled={isLoading || isOAuthLoading}
             >
               {isLoading ? (
                 <>
@@ -113,6 +130,37 @@ function LoginForm() {
             </Button>
           </form>
         </Form>
+
+        {LINUXDO_ENABLED && (
+          <>
+            <div className="relative my-4">
+              <Separator />
+              <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-2 text-xs text-muted-foreground">
+                或
+              </span>
+            </div>
+
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full h-11"
+              disabled={isLoading || isOAuthLoading}
+              onClick={handleLinuxDoLogin}
+            >
+              {isOAuthLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  跳转中...
+                </>
+              ) : (
+                <>
+                  <ExternalLink className="mr-2 h-4 w-4" />
+                  使用 Linux DO 账号登录
+                </>
+              )}
+            </Button>
+          </>
+        )}
       </CardContent>
     </Card>
   );
