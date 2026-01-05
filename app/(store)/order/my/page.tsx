@@ -31,6 +31,7 @@ import {
   Ban,
 } from "lucide-react";
 import Link from "next/link";
+import { formatShortTime } from "@/lib/time";
 
 interface OrderData {
   orderNo: string;
@@ -245,7 +246,7 @@ export default function MyOrdersPage() {
                       <span className="font-medium truncate">{order.productName}</span>
                     </div>
                     <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-                      <span>{formatDate(order.createdAt)}</span>
+                      <span>{formatShortTime(order.createdAt)}</span>
                       <span>×{order.quantity}</span>
                       <span className="font-medium text-foreground">{order.totalAmount} LDC</span>
                     </div>
