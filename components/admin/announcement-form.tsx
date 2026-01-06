@@ -60,9 +60,12 @@ export function AnnouncementForm({ announcementId }: { announcementId?: string }
 
   useEffect(() => {
     if (!announcementId) return;
+    // TypeScript 不会对被闭包捕获的变量做跨函数的类型收窄；这里先固化 id，
+    // 既能满足类型安全，也避免异步请求过程中 announcementId 变化导致读写错位。
+    const id = announcementId;
 
     async function loadAnnouncement() {
-      const announcement = await getAnnouncementById(announcementId);
+      const announcement = await getAnnouncementById(id);
       if (!announcement) {
         toast.error("公告不存在或无权限访问");
         router.push("/admin/announcements");
