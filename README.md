@@ -12,6 +12,8 @@
 - 商品列表展示、分类导航
 - 商品详情页（支持 Markdown）、热门标签、折扣价格显示
 - 库存实时展示、销量统计
+- 首页公告展示（支持定时上下线）
+- 商品关键词搜索（Header 搜索入口 + 结果页筛选/排序/分页）
 
 ### 🔐 登录与权限
 - **用户下单** - 使用 Linux DO Connect OAuth2 登录，下单/查单与账号绑定
@@ -138,6 +140,13 @@ pnpm dev
 访问:
 - 前台商店: http://localhost:3000
 - 后台管理: http://localhost:3000/admin
+
+### 5. 测试（可选）
+
+```bash
+pnpm test
+pnpm test:coverage
+```
 
 ### 管理员登录
 

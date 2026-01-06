@@ -14,6 +14,7 @@ import {
   ChevronUp,
   Command,
   User,
+  Megaphone,
 } from "lucide-react";
 import { signOut, useSession } from "next-auth/react";
 
@@ -67,6 +68,11 @@ const mainNavItems = [
     title: "订单管理",
     href: "/admin/orders",
     icon: ShoppingCart,
+  },
+  {
+    title: "公告管理",
+    href: "/admin/announcements",
+    icon: Megaphone,
   },
 ];
 
@@ -261,4 +267,3 @@ export function AppSidebar() {
     </Sidebar>
   );
 }
-

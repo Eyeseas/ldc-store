@@ -11,12 +11,14 @@ const CachePaths = {
   HOME: "/",
   PRODUCT: (slug: string) => `/product/${slug}`,
   CATEGORY: (slug: string) => `/category/${slug}`,
+  SEARCH: "/search",
   
   // 后台页面 (虽然是 force-dynamic，但显式清理更安全)
   ADMIN_PRODUCTS: "/admin/products",
   ADMIN_CARDS: "/admin/cards",
   ADMIN_CATEGORIES: "/admin/categories",
   ADMIN_ORDERS: "/admin/orders",
+  ADMIN_ANNOUNCEMENTS: "/admin/announcements",
 } as const;
 
 /**
@@ -81,6 +83,15 @@ export async function revalidateOrderCache() {
 }
 
 /**
+ * 清理公告相关缓存
+ * 公告影响前台首页（Banner）与后台公告管理页
+ */
+export async function revalidateAnnouncementCache() {
+  revalidatePath(CachePaths.HOME);
+  revalidatePath(CachePaths.ADMIN_ANNOUNCEMENTS);
+}
+
+/**
  * 清理所有商店前台缓存
  * 用于批量操作或需要完全刷新的场景
  */
@@ -88,6 +99,7 @@ export async function revalidateAllStoreCache() {
   revalidatePath(CachePaths.HOME);
   // 使用 layout 路径可以清理该 layout 下的所有页面
   revalidatePath("/(store)", "layout");
+  revalidatePath(CachePaths.SEARCH);
 }
 
 /**
@@ -105,4 +117,3 @@ export async function revalidateProductAndRelatedCache(
     revalidatePath(CachePaths.CATEGORY(categorySlug));
   }
 }
-

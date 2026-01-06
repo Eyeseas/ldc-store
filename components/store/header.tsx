@@ -1,7 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
-import { User, LogOut, Package } from "lucide-react";
+import { User, LogOut, Package, Search } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LinuxDoLogo } from "@/components/icons/linuxdo-logo";
 import { Button } from "@/components/ui/button";
@@ -14,6 +15,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useSession, signIn, signOut } from "next-auth/react";
+import { SearchBar } from "@/components/store/search-bar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 interface HeaderProps {
   siteName?: string;
@@ -21,6 +24,7 @@ interface HeaderProps {
 
 export function Header({ siteName = "LDC Store" }: HeaderProps) {
   const { data: session, status } = useSession();
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
 
   // 检查是否是 Linux DO 登录用户
   const user = session?.user as { 
@@ -49,6 +53,26 @@ export function Header({ siteName = "LDC Store" }: HeaderProps) {
         </Link>
 
         <div className="flex items-center gap-2">
+          {/* 桌面端搜索框 */}
+          <div className="hidden md:block w-72">
+            <SearchBar />
+          </div>
+
+          {/* 移动端搜索入口 */}
+          <Popover open={mobileSearchOpen} onOpenChange={setMobileSearchOpen}>
+            <PopoverTrigger asChild>
+              <Button variant="ghost" size="icon" className="md:hidden" aria-label="搜索">
+                <Search className="h-4 w-4" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-[calc(100vw-2rem)] max-w-sm p-3">
+              <SearchBar
+                autoFocus
+                onAfterSubmit={() => setMobileSearchOpen(false)}
+              />
+            </PopoverContent>
+          </Popover>
+
           <ThemeToggle />
           
           {/* 用户状态 */}

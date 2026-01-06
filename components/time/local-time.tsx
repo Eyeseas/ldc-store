@@ -2,7 +2,6 @@
 
 import { format, isValid } from "date-fns";
 import { zhCN } from "date-fns/locale";
-import { useEffect, useState } from "react";
 
 type LocalTimeMode = "short" | "full";
 
@@ -18,15 +17,11 @@ function parseDate(value: LocalTimeProps["value"]): Date | null {
 }
 
 export function LocalTime({ value, mode = "full" }: LocalTimeProps) {
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
   // 该组件的目的就是“按浏览器本地时区显示时间”，因此避免在服务端预渲染具体时间字符串，
   // 否则会出现服务端(UTC)与客户端(用户时区)不一致导致的闪烁/水合不一致问题。
-  if (!mounted) return <span>-</span>;
+  if (typeof window === "undefined") {
+    return <span suppressHydrationWarning>-</span>;
+  }
 
   const date = parseDate(value);
   if (!date) return <span>-</span>;

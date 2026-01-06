@@ -175,7 +175,9 @@ export default function RefundPage({ params }: PageProps) {
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
               <p className="font-medium">请根据上方响应结果选择操作：</p>
               <ul className="mt-1 list-inside list-disc text-xs">
-                <li>如果显示 "code":1 表示退款成功，点击下方绿色按钮</li>
+                <li>
+                  如果显示 <code>{'"code":1'}</code> 表示退款成功，点击下方绿色按钮
+                </li>
                 <li>如果显示错误或被 CF 拦截，点击红色按钮</li>
               </ul>
             </div>
@@ -205,4 +207,3 @@ export default function RefundPage({ params }: PageProps) {
     </div>
   );
 }
-

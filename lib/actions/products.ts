@@ -257,6 +257,118 @@ export async function getAllProducts(options?: {
 }
 
 /**
+ * 搜索商品（前台）
+ * - 默认使用 ILIKE 模糊匹配（name/description/content）
+ * - 为避免慢查询放大，建议在 UI 层限制最小关键词长度与分页大小
+ */
+export async function searchProducts(
+  keyword: string,
+  options?: {
+    categoryId?: string;
+    sort?: "relevance" | "price_asc" | "price_desc" | "sales_desc" | "newest";
+    limit?: number;
+    offset?: number;
+  }
+) {
+  // 懒加载释放过期订单，确保库存准确
+  await lazyReleaseExpiredOrders();
+
+  const query = keyword.trim();
+  const { categoryId, sort = "relevance", limit = 12, offset = 0 } = options || {};
+
+  // 关键：短关键词会导致命中面过大，容易拖慢数据库；这里做兜底保护
+  if (query.length < 2) {
+    return { items: [], total: 0 };
+  }
+
+  const pattern = `%${query}%`;
+  const matchCondition = or(
+    ilike(products.name, pattern),
+    ilike(products.description, pattern),
+    ilike(products.content, pattern)
+  )!;
+
+  const conditions = [eq(products.isActive, true), matchCondition];
+  if (categoryId) {
+    conditions.push(eq(products.categoryId, categoryId));
+  }
+
+  const whereClause = and(...conditions);
+
+  const [{ count }] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(products)
+    .where(whereClause);
+
+  if (!count) {
+    return { items: [], total: 0 };
+  }
+
+  // 相关度排序（简单版）：命中 name > description > content
+  const relevanceScore = sql<number>`
+    (CASE WHEN ${products.name} ILIKE ${pattern} THEN 3 ELSE 0 END) +
+    (CASE WHEN ${products.description} ILIKE ${pattern} THEN 2 ELSE 0 END) +
+    (CASE WHEN ${products.content} ILIKE ${pattern} THEN 1 ELSE 0 END)
+  `;
+
+  const orderBy = (() => {
+    switch (sort) {
+      case "price_asc":
+        return [asc(products.price), desc(products.isFeatured), asc(products.sortOrder), desc(products.createdAt)];
+      case "price_desc":
+        return [desc(products.price), desc(products.isFeatured), asc(products.sortOrder), desc(products.createdAt)];
+      case "sales_desc":
+        return [desc(products.salesCount), desc(products.isFeatured), asc(products.sortOrder), desc(products.createdAt)];
+      case "newest":
+        return [desc(products.createdAt)];
+      case "relevance":
+      default:
+        return [desc(relevanceScore), desc(products.isFeatured), asc(products.sortOrder), desc(products.createdAt)];
+    }
+  })();
+
+  const productList = await db.query.products.findMany({
+    where: whereClause,
+    with: {
+      category: {
+        columns: {
+          id: true,
+          name: true,
+          slug: true,
+        },
+      },
+    },
+    orderBy,
+    limit,
+    offset,
+  });
+
+  if (productList.length === 0) {
+    return { items: [], total: count ?? 0 };
+  }
+
+  const productIds = productList.map((p) => p.id);
+  const stockCounts = await db
+    .select({
+      productId: cards.productId,
+      count: sql<number>`count(*)::int`,
+    })
+    .from(cards)
+    .where(and(inArray(cards.productId, productIds), eq(cards.status, "available")))
+    .groupBy(cards.productId);
+
+  const stockMap = new Map(stockCounts.map((s) => [s.productId, s.count]));
+
+  return {
+    items: productList.map((product) => ({
+      ...product,
+      stock: stockMap.get(product.id) || 0,
+    })),
+    total: count ?? 0,
+  };
+}
+
+/**
  * 创建商品
  */
 export async function createProduct(input: CreateProductInput) {
