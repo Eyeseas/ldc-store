@@ -90,15 +90,18 @@ function ProductGridSkeleton() {
       {Array.from({ length: 3 }).map((_, i) => (
         <div
           key={i}
-          className="flex flex-col overflow-hidden rounded-xl border bg-card"
+          className="flex flex-col overflow-hidden rounded-2xl border bg-card shadow-sm"
         >
           <Skeleton className="aspect-[4/3] w-full" />
           <div className="p-4 space-y-3">
-            <Skeleton className="h-5 w-3/4" />
+            <div className="flex items-start justify-between gap-3">
+              <Skeleton className="h-5 w-3/4" />
+              <Skeleton className="h-6 w-16 rounded-full" />
+            </div>
             <Skeleton className="h-4 w-full" />
-            <div className="flex justify-between pt-2">
-              <Skeleton className="h-6 w-20" />
-              <Skeleton className="h-4 w-12" />
+            <div className="flex flex-wrap gap-2 pt-2">
+              <Skeleton className="h-6 w-20 rounded-full" />
+              <Skeleton className="h-6 w-16 rounded-full" />
             </div>
           </div>
         </div>
