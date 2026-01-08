@@ -21,7 +21,9 @@ import {
 import { formatLocalTime } from "@/lib/time";
 
 interface OrderResultPageProps {
-  searchParams: Promise<{ out_trade_no?: string }>;
+  // Next 在不同渲染路径下可能传 Promise 或已解析对象；这里兼容两者，
+  // 避免在测试/边缘运行时因为形态差异导致页面不可用。
+  searchParams: Promise<{ out_trade_no?: string }> | { out_trade_no?: string };
 }
 
 interface OrderData {
@@ -39,8 +41,12 @@ interface OrderData {
 const POLL_INTERVAL = 2000; // 每 2 秒轮询一次
 const MAX_POLL_COUNT = 15; // 最多轮询 15 次（共 30 秒）
 
+function isThenable<T>(value: unknown): value is PromiseLike<T> {
+  return typeof (value as { then?: unknown } | null)?.then === "function";
+}
+
 export default function OrderResultPage({ searchParams }: OrderResultPageProps) {
-  const params = use(searchParams);
+  const params = isThenable<{ out_trade_no?: string }>(searchParams) ? use(searchParams) : searchParams;
   const { data: session, status: sessionStatus } = useSession();
   const [orderNo, setOrderNo] = useState(params.out_trade_no || "");
 
