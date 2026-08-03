@@ -30,8 +30,9 @@
 
 1. 访问 [Linux DO Credit 控制台](https://credit.linux.do)
 2. 创建新应用
-3. 记录 `pid` (Client ID) 和 `key` (Secret)
+3. 记录 Client ID 和 Client Secret
 4. **重要**：暂时不要配置回调地址，等部署完成后再填写
+5. 如需使用原生 `ldcpay`，运行 `pnpm ldc:keygen`，将输出的 32 字节公钥上传控制台；PKCS#8 私钥只存入部署平台密钥
 
 ### 3. Linux DO OAuth2 凭证（必须）
 
@@ -98,8 +99,12 @@
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
 | `LDC_GATEWAY` | 支付网关地址（一般无需修改） | `https://credit.linux.do/epay` |
-| `LDC_REFUND_MODE` | 退款模式：`client`/`proxy`/`disabled` | `client` |
-| `LDC_PROXY_URL` | LDC API 代理地址（`proxy` 模式必填，用于绕过 Cloudflare） | - |
+| `LDC_PAYMENT_PROTOCOL` | 支付协议：`epay`/`ldcpay` | `epay` |
+| `LDC_ED25519_PRIVATE_KEY_PKCS8_BASE64` | `ldcpay` 使用的服务端私钥 | - |
+| `LDC_REFUND_MODE` | 退款模式：`server`/`proxy`/`disabled` | `disabled` |
+| `LDC_PROXY_URL` | 可信 HTTPS LDC API 代理地址（`proxy` 模式必填） | - |
+
+`LDC_CLIENT_SECRET` 与 Ed25519 私钥不得配置为 `NEXT_PUBLIC_*`。浏览器退款模式已移除，退款超时或未知结果需要在后台人工核对。
 
 ### 步骤 4：部署
 

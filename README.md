@@ -8,6 +8,8 @@ A virtual goods automated card delivery platform built on Next.js 16, supporting
 
 > 📚 **Detailed Deployment Guide**: [docs/DEPLOY.md](./docs/DEPLOY.md)
 
+> 💳 **Linux DO Credit Integration**: [API reference](./docs/linux-do-credit-api.md) · [Development plan](./docs/linux-do-credit-development-plan.md)
+
 ## ✨ Features
 
 ### 🛒 Storefront
@@ -28,7 +30,7 @@ A virtual goods automated card delivery platform built on Next.js 16, supporting
 - **Session Management** - JWT session strategy based on NextAuth v5
 
 ### 💳 Automated Card Delivery
-- Supports Linux DO Credit payments
+- Supports Linux DO Credit `epay` compatibility mode and native `ldcpay` with Ed25519
 - Automatic card key delivery upon successful payment
 - Auto-release of locked inventory on order timeout (lazy load + throttle strategy)
 - Idempotent payment callback handling to prevent duplicate deliveries
@@ -36,10 +38,10 @@ A virtual goods automated card delivery platform built on Next.js 16, supporting
 
 ### 🔄 Refund System
 - Users can apply for refunds (with reason), reviewed by admin
-- **Client Mode** (default): Bypasses CORS/CF restrictions via browser form submission (no proxy needed)
-- **Proxy Mode**: Calls LDC Credit refund API via server-side proxy
-- **Disabled Mode**: Refund feature can be turned off
-- Automatic card key reclamation on successful refund (status restored to available)
+- **Server Mode**: Calls the official refund API from the server
+- **Proxy Mode**: Calls the refund API through an explicitly configured HTTPS proxy
+- **Disabled Mode** (default): No refund request is sent
+- Successful refunds mark card keys as refunded; relisting remains an explicit admin action
 
 ### 📦 Inventory Management
 - **Bulk Import** - Supports newline/comma-separated input, optional auto-deduplication
@@ -127,7 +129,11 @@ ADMIN_USERNAMES="admin1,admin2"
 # Linux DO Credit payment
 LDC_CLIENT_ID="your_client_id"
 LDC_CLIENT_SECRET="your_client_secret"
+LDC_PAYMENT_PROTOCOL="epay"
+# Required only for ldcpay; generate with: pnpm ldc:keygen
+# LDC_ED25519_PRIVATE_KEY_PKCS8_BASE64="your_pkcs8_private_key_base64"
 LDC_GATEWAY="https://credit.linux.do/epay"
+LDC_REFUND_MODE="disabled"
 
 # Linux DO OAuth2 login (required for user orders/queries)
 LINUXDO_CLIENT_ID="your_linuxdo_client_id"
@@ -196,9 +202,11 @@ Visit `/admin`:
 | `ADMIN_PASSWORD` | ✅ | - | Admin login password |
 | `LDC_CLIENT_ID` | ✅ | - | Linux DO Credit Client ID |
 | `LDC_CLIENT_SECRET` | ✅ | - | Linux DO Credit Client Secret |
+| `LDC_PAYMENT_PROTOCOL` | ❌ | `epay` | Payment protocol: `epay` or native `ldcpay` |
+| `LDC_ED25519_PRIVATE_KEY_PKCS8_BASE64` | `ldcpay` only | - | Server-only PKCS#8 Ed25519 private key in Base64 |
 | `LDC_GATEWAY` | ❌ | `https://credit.linux.do/epay` | Payment gateway URL |
-| `LDC_REFUND_MODE` | ❌ | `client` | Refund mode: `client` / `proxy` / `disabled` |
-| `LDC_PROXY_URL` | ❌ | - | LDC API proxy URL (proxy mode, bypasses Cloudflare) |
+| `LDC_REFUND_MODE` | ❌ | `disabled` | Refund mode: `server` / `proxy` / `disabled` |
+| `LDC_PROXY_URL` | `proxy` only | - | Trusted HTTPS LDC API proxy URL |
 | `ADMIN_USERNAMES` | ❌ | - | Linux DO admin username whitelist (comma-separated), grants `admin` role |
 | `LINUXDO_CLIENT_ID` | ✅ | - | Linux DO OAuth2 Client ID (required for user orders/queries) |
 | `LINUXDO_CLIENT_SECRET` | ✅ | - | Linux DO OAuth2 Client Secret (required for user orders/queries) |
@@ -219,47 +227,36 @@ Visit `/admin`:
 ## 📝 Linux DO Credit Configuration
 
 1. Visit the [Linux DO Credit Console](https://credit.linux.do)
-2. Create a new application to get your `pid` and `key`
+2. Create an application and record its Client ID and Client Secret
 3. Configure callback addresses:
    - **Notify URL:** `https://your-domain.com/api/payment/notify`
    - **Return URL:** `https://your-domain.com/order/result`
+4. Keep `LDC_PAYMENT_PROTOCOL=epay` for compatibility mode, or run `pnpm ldc:keygen`, upload the generated 32-byte public key to the console, store the PKCS#8 private key in your deployment secrets, and set `LDC_PAYMENT_PROTOCOL=ldcpay`
+
+The private key and Client Secret are server credentials. Do not expose either value through `NEXT_PUBLIC_*`, browser code, proxy logs, or support screenshots.
 
 ## 🔄 Refund Configuration
 
-Because the Linux DO Credit API is protected by Cloudflare, direct server-side calls from Vercel and similar hosts will be blocked. This project supports two refund modes:
+Refunds are disabled by default. Enable them only after confirming that the deployment can reach the official API directly or through a trusted HTTPS proxy.
 
 ### Refund Modes
 
 | Mode | Environment Variable | Description |
 |------|---------------------|-------------|
-| **Client Mode** | `LDC_REFUND_MODE=client` (default) | Bypasses CORS/CF via browser form submission, no proxy needed |
+| **Server Mode** | `LDC_REFUND_MODE=server` | Calls the official API from the application server |
 | **Proxy Mode** | `LDC_REFUND_MODE=proxy` + `LDC_PROXY_URL` | Calls LDC API via server-side proxy |
-| **Disabled** | `LDC_REFUND_MODE=disabled` | Disables the refund feature |
-
-### Client Mode (Recommended)
-
-Enabled by default, no extra configuration needed. How it works:
-
-1. Admin clicks "Approve Refund", which opens a new window
-2. The new window POSTs to the LDC API via an HTML form (form submission is not subject to CORS restrictions)
-3. The window displays the LDC API response
-4. After admin confirms the refund, the system updates the order status
-
-> 💡 **Tip**: If you encounter a Cloudflare challenge, the admin should first visit `credit.linux.do` in the browser to pass verification, then retry the refund.
+| **Disabled** | `LDC_REFUND_MODE=disabled` (default) | Disables the refund feature |
 
 ### Proxy Mode (Optional)
 
-If client mode doesn't meet your needs, you can configure a proxy service:
-
-1. Deploy [gin-flaresolverr-proxy](https://github.com/gptkong/gin-flaresolverr-proxy)
-2. Configure the environment variables:
+Use a proxy only when direct server access is unavailable. The proxy must use HTTPS and must never log or return the Client Secret.
 
 ```env
 LDC_REFUND_MODE=proxy
-LDC_PROXY_URL="https://your-proxy-domain.com/api"
+LDC_PROXY_URL="https://your-proxy-domain.com/api.php"
 ```
 
-> ⚠️ **Note**: Proxy functionality may break if the Linux DO Credit API changes. Monitor the upstream repository for updates.
+Browser/client refund mode is intentionally unsupported because it would expose payment credentials. Timeout or unknown refund results are recorded for manual reconciliation and are not automatically retried.
 
 ## 🔑 Linux DO OAuth2 Login Configuration
 

@@ -343,6 +343,9 @@ function OrderInfoCard({ order }: { order: OrderDetailData }) {
           </div>
         </Field>
         <Field label="支付方式">{paymentLabel}</Field>
+        <Field label="支付协议">
+          <code className="font-mono text-xs">{order.paymentProtocol}</code>
+        </Field>
         <Field label="订单状态">
           <Badge className={orderStatusConfig[order.status].color}>
             {orderStatusConfig[order.status].label}
@@ -375,6 +378,13 @@ function OrderInfoCard({ order }: { order: OrderDetailData }) {
 }
 
 function OrderNotesCard({ order }: { order: OrderDetailData }) {
+  const refundAttemptLabels = {
+    processing: "处理中",
+    succeeded: "平台已确认成功",
+    failed: "平台明确失败",
+    uncertain: "结果待人工核对",
+  } as const;
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -384,10 +394,35 @@ function OrderNotesCard({ order }: { order: OrderDetailData }) {
         {order.refundReason ? (
           <NoteBlock title="退款原因" content={order.refundReason} tone="warning" />
         ) : null}
+        {order.paymentReviewReason ? (
+          <NoteBlock
+            title="支付人工核对"
+            content={`${order.paymentReviewReason} · 交易号 ${order.paymentReviewTradeNo ?? "未知"}`}
+            tone="warning"
+          />
+        ) : null}
         <div className="grid gap-3 md:grid-cols-2">
           <NoteBlock title="用户备注" content={order.remark} />
           <NoteBlock title="管理员备注" content={order.adminRemark} />
         </div>
+        {order.refundAttemptStatus ? (
+          <div className="grid gap-3 rounded-md border p-3 text-sm md:grid-cols-2">
+            <Field label="退款尝试状态">
+              {refundAttemptLabels[order.refundAttemptStatus]}
+            </Field>
+            <Field label="操作管理员 ID">
+              <code className="font-mono text-xs">
+                {order.refundAttemptedBy ?? "—"}
+              </code>
+            </Field>
+            <Field label="平台响应码">
+              {order.refundResponseCode ?? "—"}
+            </Field>
+            <Field label="平台响应">
+              {order.refundResponseMessage ?? "—"}
+            </Field>
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   );
@@ -626,6 +661,12 @@ function TimeInfoCard({ order }: { order: OrderDetailData }) {
         </Field>
         <Field label="退款完成时间">
           <LocalTime value={order.refundedAt} />
+        </Field>
+        <Field label="退款尝试时间">
+          <LocalTime value={order.refundAttemptedAt} />
+        </Field>
+        <Field label="支付人工核对时间">
+          <LocalTime value={order.paymentReviewAt} />
         </Field>
       </CardContent>
     </Card>

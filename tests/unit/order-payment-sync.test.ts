@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // 通过 mock db + LDC 查询结果，覆盖“notify 未到时的补偿查询发货”链路。
 
@@ -11,7 +11,6 @@ vi.mock("@/lib/payment/ldc", () => ({
   refundOrder: vi.fn(),
   isRefundEnabled: vi.fn(),
   getRefundMode: vi.fn(),
-  getClientRefundParams: vi.fn(),
   queryPaymentOrder: (...args: unknown[]) => ldcMocks.queryPaymentOrder(...args),
 }));
 
@@ -81,6 +80,7 @@ vi.mock("@/lib/db", () => {
           userId: "u1",
           status: dbState.status,
           paymentMethod: "ldc",
+          paymentProtocol: "epay",
           totalAmount: "10.00",
           productName: "商品 A",
           quantity: 1,
@@ -149,6 +149,14 @@ vi.mock("@/lib/db", () => {
 
 import { getOrderByNo } from "@/lib/actions/orders";
 
+beforeEach(() => {
+  dbState.status = "pending";
+  dbState.tradeNo = null;
+  dbState.cards = [{ id: "c1", content: "CARD-001", status: "locked" }];
+  authMock.mockReset();
+  ldcMocks.queryPaymentOrder.mockReset();
+});
+
 describe("getOrderByNo - payment compensation", () => {
   it("should sync LDC paid status when order is pending", async () => {
     authMock.mockResolvedValueOnce({
@@ -173,5 +181,29 @@ describe("getOrderByNo - payment compensation", () => {
     expect(result.success).toBe(true);
     expect(result.data?.status).toBe("completed");
     expect(result.data?.cards).toEqual(["CARD-001"]);
+  });
+
+  it("协议不匹配时不得通过补偿查询发货", async () => {
+    authMock.mockResolvedValueOnce({
+      user: { id: "u1", provider: "linux-do" },
+    });
+    ldcMocks.queryPaymentOrder.mockResolvedValueOnce({
+      code: 1,
+      msg: "ok",
+      trade_no: "TRADE_1",
+      out_trade_no: "ORDER_1",
+      type: "ldcpay",
+      pid: "1001",
+      addtime: "2026-01-01 00:00:00",
+      endtime: "2026-01-01 00:01:00",
+      name: "商品 A",
+      money: "10.00",
+      status: 1,
+    });
+
+    const result = await getOrderByNo("ORDER_1");
+
+    expect(result.data?.status).toBe("pending");
+    expect(result.data?.cards).toEqual([]);
   });
 });

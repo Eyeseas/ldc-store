@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import fc from "fast-check";
 
-import { parseWalletAmount } from "@/lib/money";
+import {
+  formatCents,
+  multiplyMoney,
+  parseMoneyToCents,
+  parseWalletAmount,
+} from "@/lib/money";
 
 function toCents(amount: number): number {
   return Math.round(amount * 100);
@@ -35,6 +40,21 @@ describe("utils/amount", () => {
   it("应拒绝负数", () => {
     expect(parseWalletAmount("-1")).toBeNull();
     expect(parseWalletAmount("-0.01")).toBeNull();
+  });
+
+  it("应以整数分解析、格式化和相乘金额", () => {
+    expect(parseMoneyToCents("0.10")).toBe(10);
+    expect(parseMoneyToCents("1,234.5")).toBe(123450);
+    expect(formatCents(30)).toBe("0.30");
+    expect(multiplyMoney("0.10", 3)).toBe("0.30");
+    expect(multiplyMoney("99999999.99", 100)).toBe("9999999999.00");
+  });
+
+  it("金额整数运算应拒绝非法值和不安全整数", () => {
+    expect(parseMoneyToCents("1.234")).toBeNull();
+    expect(formatCents(-1)).toBeNull();
+    expect(multiplyMoney("10.00", 0)).toBeNull();
+    expect(multiplyMoney("99999999999999.99", 100)).toBeNull();
   });
 
   it("property: 应正确解析两位小数金额（含千分位与空格）", () => {

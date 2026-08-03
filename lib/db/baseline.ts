@@ -9,8 +9,8 @@
  * 这个脚本做的事情：
  * - 如果数据库已经有迁移记录：不做任何事（说明已经进入 migrate 流程）
  * - 如果数据库是全新空库：不做任何事（应该直接跑 `pnpm db:migrate`）
- * - 如果数据库已有业务表但没有迁移记录：把本地 migrations 目录中的迁移“标记为已应用”（baseline），
- *   让后续 `pnpm db:migrate` 只执行未来的新迁移。
+ * - 如果数据库已有业务表但没有迁移记录：只把 legacy baseline（0000-0005）标记为已应用，
+ *   让后续 `pnpm db:migrate` 真正执行 0006 及之后的增量迁移。
  *
  * 运行: pnpm db:baseline
  */
@@ -44,6 +44,7 @@ const MIGRATIONS_SCHEMA = "drizzle";
 const MIGRATIONS_TABLE = "__drizzle_migrations";
 const MIGRATIONS_DIR = path.join(process.cwd(), "lib/db/migrations");
 const JOURNAL_PATH = path.join(MIGRATIONS_DIR, "meta/_journal.json");
+const LEGACY_BASELINE_MAX_INDEX = 5;
 
 type SqlClient = ReturnType<typeof postgres>;
 
@@ -112,7 +113,13 @@ const baseline = async (): Promise<void> => {
   }
 
   const journal = readJournal();
-  const records = computeMigrationRecords(journal);
+  const baselineJournal: Journal = {
+    ...journal,
+    entries: journal.entries.filter(
+      (entry) => entry.idx <= LEGACY_BASELINE_MAX_INDEX
+    ),
+  };
+  const records = computeMigrationRecords(baselineJournal);
 
   if (records.length === 0) {
     console.log("ℹ️  本地 migrations 为空，无需 baseline");
@@ -151,8 +158,8 @@ const baseline = async (): Promise<void> => {
       console.log(`✅ 已标记迁移: ${record.tag}`);
     }
 
-    console.log("\n🎉 baseline 完成！");
-    console.log("📝 下一步：运行 `pnpm db:migrate`（应为 no-op），之后只用 migrate 管理变更。");
+    console.log("\n🎉 legacy baseline 完成！");
+    console.log("📝 下一步：运行 `pnpm db:migrate` 应用 0006 及之后的增量迁移。");
   } catch (error) {
     console.error("❌ baseline 失败:", error);
     process.exit(1);

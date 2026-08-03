@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { redirect } from "next/navigation";
 
-import { isRefundEnabled, getRefundMode } from "@/lib/payment/ldc";
+import { isRefundEnabled } from "@/lib/payment/ldc";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ShoppingCart, CheckCircle2, Clock, RotateCcw } from "lucide-react";
 
@@ -92,7 +92,6 @@ export default async function OrdersPage({ searchParams }: OrdersPageProps) {
   const safePage = Math.min(page, totalPages);
 
   const refundEnabled = isRefundEnabled();
-  const refundMode = getRefundMode();
 
   return (
     <div className="space-y-6">
@@ -182,7 +181,6 @@ export default async function OrdersPage({ searchParams }: OrdersPageProps) {
             status={status}
             paymentMethod={paymentMethod}
             refundEnabled={refundEnabled}
-            refundMode={refundMode}
           />
         </CardContent>
       </Card>

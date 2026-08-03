@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 
 import type { AdminOrderListItem } from "@/lib/actions/admin-orders";
 import type { OrderStatus, PaymentMethod } from "@/lib/db";
-import type { RefundMode } from "@/lib/payment/ldc";
 
 import { OrdersFilters } from "./orders-filters";
 import { OrdersPagination } from "./orders-pagination";
@@ -20,7 +19,6 @@ export function OrdersClient({
   status,
   paymentMethod,
   refundEnabled,
-  refundMode,
 }: {
   items: AdminOrderListItem[];
   total: number;
@@ -31,7 +29,6 @@ export function OrdersClient({
   status?: OrderStatus;
   paymentMethod?: PaymentMethod;
   refundEnabled: boolean;
-  refundMode: RefundMode;
 }) {
   const hasActiveFilters = Boolean(q || status || paymentMethod);
 
@@ -57,7 +54,6 @@ export function OrdersClient({
           key={`${page}:${pageSize}:${q}:${status ?? ""}:${paymentMethod ?? ""}`}
           items={items}
           refundEnabled={refundEnabled}
-          refundMode={refundMode}
         />
       ) : (
         <div className="rounded-lg border py-12 text-center text-sm text-muted-foreground">

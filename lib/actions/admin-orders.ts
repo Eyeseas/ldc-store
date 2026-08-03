@@ -8,6 +8,8 @@ import {
   type CardStatus,
   type OrderStatus,
   type PaymentMethod,
+  type PaymentProtocol,
+  type RefundAttemptStatus,
 } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth-utils";
 import { revalidatePath } from "next/cache";
@@ -64,8 +66,12 @@ export interface AdminOrderDetail {
   quantity: number;
   totalAmount: string;
   paymentMethod: PaymentMethod;
+  paymentProtocol: PaymentProtocol;
   status: OrderStatus;
   tradeNo: string | null;
+  paymentReviewReason: string | null;
+  paymentReviewTradeNo: string | null;
+  paymentReviewAt: string | null;
   userId: string | null;
   username: string | null;
   email: string | null;
@@ -78,6 +84,11 @@ export interface AdminOrderDetail {
   updatedAt: string;
   refundRequestedAt: string | null;
   refundedAt: string | null;
+  refundAttemptStatus: RefundAttemptStatus | null;
+  refundAttemptedAt: string | null;
+  refundAttemptedBy: string | null;
+  refundResponseCode: number | null;
+  refundResponseMessage: string | null;
   cards: AdminOrderDetailCardItem[];
   product?: {
     id: string;
@@ -407,8 +418,12 @@ export async function getAdminOrderDetail(orderId: string): Promise<AdminOrderDe
         quantity: order.quantity,
         totalAmount: order.totalAmount,
         paymentMethod: order.paymentMethod,
+        paymentProtocol: order.paymentProtocol,
         status: order.status,
         tradeNo: order.tradeNo ?? null,
+        paymentReviewReason: order.paymentReviewReason ?? null,
+        paymentReviewTradeNo: order.paymentReviewTradeNo ?? null,
+        paymentReviewAt: toIsoString(order.paymentReviewAt),
         userId: order.userId ?? null,
         username: order.username ?? null,
         email: order.email ?? null,
@@ -421,6 +436,11 @@ export async function getAdminOrderDetail(orderId: string): Promise<AdminOrderDe
         updatedAt: toIsoString(order.updatedAt) ?? "",
         refundRequestedAt: toIsoString(order.refundRequestedAt),
         refundedAt: toIsoString(order.refundedAt),
+        refundAttemptStatus: order.refundAttemptStatus ?? null,
+        refundAttemptedAt: toIsoString(order.refundAttemptedAt),
+        refundAttemptedBy: order.refundAttemptedBy ?? null,
+        refundResponseCode: order.refundResponseCode ?? null,
+        refundResponseMessage: order.refundResponseMessage ?? null,
         cards: order.cards.map(serializeAdminOrderDetailCard),
         product: order.product
           ? {

@@ -6,6 +6,8 @@
 
 > 📚 **详细部署指南**: [docs/DEPLOY.md](./DEPLOY.md)
 
+> 💳 **Linux DO Credit 接入**：[API 核对记录](./linux-do-credit-api.md) · [开发计划](./linux-do-credit-development-plan.md)
+
 ## ✨ 特性
 
 ### 🛒 前台商店
@@ -26,7 +28,7 @@
 - **会话管理** - 基于 NextAuth v5 的 JWT 会话策略
 
 ### 💳 自动发卡
-- 支持 Linux DO Credit 积分支付
+- 支持 Linux DO Credit `epay` 兼容协议与 Ed25519 原生 `ldcpay` 协议
 - 支付成功后自动发放卡密
 - 订单超时自动释放锁定库存（懒加载 + 节流策略）
 - 支付回调幂等处理，防止重复投递
@@ -34,10 +36,10 @@
 
 ### 🔄 退款功能
 - 用户可申请退款（需填写退款原因），管理员审核
-- **客户端模式**（默认）：通过浏览器表单提交绕过 CORS/CF 限制（无需代理）
-- **代理模式**：通过服务端代理调用 LDC Credit 退款接口
-- **禁用模式**：可关闭退款功能
-- 退款成功后自动回收卡密（状态恢复为 available）
+- **服务端模式**：应用服务端直连官方退款接口
+- **代理模式**：通过显式配置的可信 HTTPS 代理调用退款接口
+- **禁用模式**（默认）：不发送退款请求
+- 退款成功后卡密标记为 `refunded`，重新上架需管理员显式操作
 
 ### 📦 库存管理
 - **批量导入** - 支持换行符/逗号分隔，自动去重（可选）
@@ -125,7 +127,11 @@ ADMIN_USERNAMES="admin1,admin2"
 # Linux DO Credit 支付
 LDC_CLIENT_ID="your_client_id"
 LDC_CLIENT_SECRET="your_client_secret"
+LDC_PAYMENT_PROTOCOL="epay"
+# 仅 ldcpay 需要，运行 pnpm ldc:keygen 生成
+# LDC_ED25519_PRIVATE_KEY_PKCS8_BASE64="your_pkcs8_private_key_base64"
 LDC_GATEWAY="https://credit.linux.do/epay"
+LDC_REFUND_MODE="disabled"
 
 # Linux DO OAuth2 登录（用户下单/查单必须）
 LINUXDO_CLIENT_ID="your_linuxdo_client_id"
@@ -194,9 +200,11 @@ pnpm test:coverage
 | `ADMIN_PASSWORD` | ✅ | - | 管理员登录密码 |
 | `LDC_CLIENT_ID` | ✅ | - | Linux DO Credit Client ID |
 | `LDC_CLIENT_SECRET` | ✅ | - | Linux DO Credit Client Secret |
+| `LDC_PAYMENT_PROTOCOL` | ❌ | `epay` | 支付协议：`epay` 或原生 `ldcpay` |
+| `LDC_ED25519_PRIVATE_KEY_PKCS8_BASE64` | 仅 `ldcpay` | - | 仅服务端保存的 Base64 PKCS#8 Ed25519 私钥 |
 | `LDC_GATEWAY` | ❌ | `https://credit.linux.do/epay` | 支付网关地址 |
-| `LDC_REFUND_MODE` | ❌ | `client` | 退款模式：`client`（客户端）/ `proxy`（代理）/ `disabled`（禁用）|
-| `LDC_PROXY_URL` | ❌ | - | LDC API 代理地址（代理模式时使用，绕过 Cloudflare）|
+| `LDC_REFUND_MODE` | ❌ | `disabled` | 退款模式：`server` / `proxy` / `disabled` |
+| `LDC_PROXY_URL` | 仅 `proxy` | - | 可信的 HTTPS LDC API 代理地址 |
 | `ADMIN_USERNAMES` | ❌ | - | Linux DO 管理员用户名白名单（逗号分隔），命中则授予 `admin` 角色 |
 | `LINUXDO_CLIENT_ID` | ✅ | - | Linux DO OAuth2 Client ID（用户下单/查单必须）|
 | `LINUXDO_CLIENT_SECRET` | ✅ | - | Linux DO OAuth2 Client Secret（用户下单/查单必须）|
@@ -217,47 +225,36 @@ pnpm test:coverage
 ## 📝 Linux DO Credit 配置
 
 1. 访问 [Linux DO Credit 控制台](https://credit.linux.do)
-2. 创建新应用，获取 `pid` 和 `key`
+2. 创建新应用，记录 Client ID 和 Client Secret
 3. 配置回调地址:
    - **Notify URL:** `https://your-domain.com/api/payment/notify`
    - **Return URL:** `https://your-domain.com/order/result`
+4. 兼容模式保持 `LDC_PAYMENT_PROTOCOL=epay`；启用原生协议时运行 `pnpm ldc:keygen`，将生成的 32 字节公钥上传控制台，将 PKCS#8 私钥存入部署平台密钥，并设置 `LDC_PAYMENT_PROTOCOL=ldcpay`
+
+Client Secret 和 Ed25519 私钥都只能存在于服务端。不得使用 `NEXT_PUBLIC_*` 暴露，不得写入浏览器代码、代理日志或支持截图。
 
 ## 🔄 退款功能配置
 
-由于 Linux DO Credit 的 API 接口受 Cloudflare 保护，从 Vercel 等服务器端直接调用会被拦截。本项目支持两种退款模式：
+退款默认禁用。仅在确认部署环境能够直连官方接口，或已部署可信 HTTPS 代理后启用。
 
 ### 退款模式
 
 | 模式 | 环境变量 | 说明 |
 |------|---------|------|
-| **客户端模式** | `LDC_REFUND_MODE=client`（默认） | 通过浏览器表单提交绕过 CORS/CF 限制，无需代理 |
+| **服务端模式** | `LDC_REFUND_MODE=server` | 应用服务端直连官方接口 |
 | **代理模式** | `LDC_REFUND_MODE=proxy` + `LDC_PROXY_URL` | 通过服务端代理调用 LDC API |
-| **禁用** | `LDC_REFUND_MODE=disabled` | 禁用退款功能 |
-
-### 客户端模式（推荐）
-
-默认启用，无需额外配置。工作原理：
-
-1. 管理员点击"通过退款"后打开新窗口
-2. 新窗口通过 HTML 表单 POST 提交到 LDC API（表单提交不受 CORS 限制）
-3. 窗口内显示 LDC API 的响应结果
-4. 管理员确认退款成功后，系统更新订单状态
-
-> 💡 **提示**：如遇 Cloudflare 验证，管理员需先在浏览器中访问 `credit.linux.do` 完成验证，然后重试退款操作。
+| **禁用** | `LDC_REFUND_MODE=disabled`（默认） | 禁用退款功能 |
 
 ### 代理模式（可选）
 
-如果客户端模式无法满足需求，可以配置代理服务：
-
-1. 部署 [gin-flaresolverr-proxy](https://github.com/gptkong/gin-flaresolverr-proxy) 服务
-2. 在环境变量中配置：
+仅当服务端无法直连官方接口时使用代理。代理必须使用 HTTPS，且不得记录或返回 Client Secret。
 
 ```env
 LDC_REFUND_MODE=proxy
-LDC_PROXY_URL="https://your-proxy-domain.com/api"
+LDC_PROXY_URL="https://your-proxy-domain.com/api.php"
 ```
 
-> ⚠️ **注意**：代理功能可能会随着 Linux DO Credit 官方接口变更而失效，请关注上游仓库更新。
+浏览器客户端退款已被移除，因为该路径会暴露支付凭证。退款超时或未知响应会进入人工核对状态，不会自动重试。
 
 ## 🔑 Linux DO OAuth2 登录配置
 

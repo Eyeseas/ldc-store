@@ -40,6 +40,18 @@ export const paymentMethodEnum = pgEnum("payment_method", [
   "usdt",      // USDT（预留）
 ]);
 
+export const paymentProtocolEnum = pgEnum("payment_protocol", [
+  "epay",
+  "ldcpay",
+]);
+
+export const refundAttemptStatusEnum = pgEnum("refund_attempt_status", [
+  "processing",
+  "succeeded",
+  "failed",
+  "uncertain",
+]);
+
 // ============================================
 // Categories Table (商品分类)
 // ============================================
@@ -125,8 +137,12 @@ export const orders = pgTable("orders", {
   
   // 支付信息
   paymentMethod: paymentMethodEnum("payment_method").default("ldc").notNull(),
+  paymentProtocol: paymentProtocolEnum("payment_protocol").default("epay").notNull(),
   status: orderStatusEnum("status").default("pending").notNull(),
   tradeNo: text("trade_no"), // 支付平台订单号
+  paymentReviewReason: text("payment_review_reason"),
+  paymentReviewTradeNo: text("payment_review_trade_no"),
+  paymentReviewAt: timestamp("payment_review_at", { withTimezone: true }),
   
   // 用户信息（OSS登录用户）
   userId: text("user_id"), // Linux DO 用户ID
@@ -151,6 +167,11 @@ export const orders = pgTable("orders", {
   refundReason: text("refund_reason"), // 退款原因
   refundRequestedAt: timestamp("refund_requested_at", { withTimezone: true }), // 申请退款时间
   refundedAt: timestamp("refunded_at", { withTimezone: true }), // 退款完成时间
+  refundAttemptStatus: refundAttemptStatusEnum("refund_attempt_status"),
+  refundAttemptedAt: timestamp("refund_attempted_at", { withTimezone: true }),
+  refundAttemptedBy: text("refund_attempted_by"),
+  refundResponseCode: integer("refund_response_code"),
+  refundResponseMessage: text("refund_response_message"),
 }, (table) => [
   uniqueIndex("orders_order_no_idx").on(table.orderNo),
   index("orders_status_idx").on(table.status),
@@ -160,6 +181,7 @@ export const orders = pgTable("orders", {
   index("orders_trade_no_idx").on(table.tradeNo),
   index("orders_user_id_idx").on(table.userId),
   index("orders_refund_status_idx").on(table.status).where(sql`status IN ('refund_pending', 'refund_rejected', 'refunded')`),
+  index("orders_refund_attempt_status_idx").on(table.refundAttemptStatus),
 ]);
 
 // ============================================
@@ -292,3 +314,5 @@ export type NewRestockRequest = typeof restockRequests.$inferInsert;
 export type CardStatus = (typeof cardStatusEnum.enumValues)[number];
 export type OrderStatus = (typeof orderStatusEnum.enumValues)[number];
 export type PaymentMethod = (typeof paymentMethodEnum.enumValues)[number];
+export type PaymentProtocol = (typeof paymentProtocolEnum.enumValues)[number];
+export type RefundAttemptStatus = (typeof refundAttemptStatusEnum.enumValues)[number];

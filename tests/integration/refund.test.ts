@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { withEnv } from "@/tests/utils";
 import {
-  getClientRefundParams,
   getRefundMode,
   isRefundEnabled,
   refundOrder,
@@ -22,25 +21,57 @@ afterEach(() => {
 });
 
 describe("refund mode", () => {
-  it("默认应为 client（无 proxy 配置）", async () => {
+  it("未配置服务端退款能力时默认禁用退款", async () => {
     await withEnv(
       { LDC_REFUND_MODE: undefined, LDC_PROXY_URL: undefined },
       async () => {
-        expect(getRefundMode()).toBe("client");
-        expect(isRefundEnabled()).toBe(true);
+        expect(getRefundMode()).toBe("disabled");
+        expect(isRefundEnabled()).toBe(false);
       }
     );
   });
 
-  it("当存在 LDC_PROXY_URL 时应为 proxy（未显式指定 client/disabled）", async () => {
+  it("仅配置 LDC_PROXY_URL 不得隐式启用退款", async () => {
     await withEnv({ LDC_PROXY_URL: "https://proxy.example.com/api.php" }, async () => {
-      expect(getRefundMode()).toBe("proxy");
-      expect(isRefundEnabled()).toBe(true);
+      expect(getRefundMode()).toBe("disabled");
+      expect(isRefundEnabled()).toBe(false);
+    });
+  });
+
+  it("proxy 模式必须同时配置代理地址", async () => {
+    await withEnv(
+      { LDC_REFUND_MODE: "proxy", LDC_PROXY_URL: undefined },
+      async () => {
+        expect(() => getRefundMode()).toThrow(/LDC_PROXY_URL/);
+      }
+    );
+  });
+
+  it("未知退款模式应直接报配置错误", async () => {
+    await withEnv({ LDC_REFUND_MODE: "typo" }, async () => {
+      expect(() => getRefundMode()).toThrow(/LDC_REFUND_MODE/);
     });
   });
 
   it("显式 disabled 应禁用退款", async () => {
     await withEnv({ LDC_REFUND_MODE: "disabled" }, async () => {
+      expect(getRefundMode()).toBe("disabled");
+      expect(isRefundEnabled()).toBe(false);
+    });
+  });
+
+  it("显式 server 应启用服务端直连退款", async () => {
+    await withEnv(
+      { LDC_REFUND_MODE: "server", LDC_PROXY_URL: undefined },
+      async () => {
+        expect(getRefundMode()).toBe("server");
+        expect(isRefundEnabled()).toBe(true);
+      }
+    );
+  });
+
+  it("旧的 client 配置不得重新启用浏览器退款", async () => {
+    await withEnv({ LDC_REFUND_MODE: "client" }, async () => {
       expect(getRefundMode()).toBe("disabled");
       expect(isRefundEnabled()).toBe(false);
     });
@@ -62,12 +93,27 @@ describe("refundOrder", () => {
         LDC_CLIENT_ID: "1001",
         LDC_CLIENT_SECRET: "secret",
         LDC_PROXY_URL: "https://proxy.example.com/api.php/",
+        LDC_REFUND_MODE: "proxy",
       },
       async () => {
         const result = await refundOrder("TRADE_1", "10.00");
         expect(result.code).toBe(1);
         expect(fetchMock).toHaveBeenCalledTimes(1);
         expect(fetchMock.mock.calls[0]?.[0]).toBe("https://proxy.example.com/api.php");
+      }
+    );
+  });
+
+  it("proxy 模式拒绝非 HTTPS 地址", async () => {
+    await withEnv(
+      {
+        LDC_CLIENT_ID: "1001",
+        LDC_CLIENT_SECRET: "secret",
+        LDC_PROXY_URL: "http://proxy.example.com/api.php",
+        LDC_REFUND_MODE: "proxy",
+      },
+      async () => {
+        await expect(refundOrder("TRADE_1", "10.00")).rejects.toThrow(/HTTPS/);
       }
     );
   });
@@ -87,6 +133,7 @@ describe("refundOrder", () => {
         LDC_CLIENT_SECRET: "secret",
         LDC_GATEWAY: "https://pay.example.com/epay",
         LDC_PROXY_URL: undefined,
+        LDC_REFUND_MODE: "server",
       },
       async () => {
         await refundOrder("TRADE_1", "10.00");
@@ -108,23 +155,125 @@ describe("refundOrder", () => {
     );
   });
 
-  it("client 模式下应返回前端直连所需参数（gateway 自动补齐 /epay）", async () => {
+  it("disabled 模式不得发起退款请求", async () => {
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
     await withEnv(
       {
         LDC_CLIENT_ID: "1001",
         LDC_CLIENT_SECRET: "secret",
-        LDC_GATEWAY: "https://pay.example.com",
-        LDC_REFUND_MODE: "client",
+        LDC_REFUND_MODE: "disabled",
+        LDC_PROXY_URL: undefined,
       },
       async () => {
-        const params = getClientRefundParams("TRADE_1", "10.00");
-        expect(params.apiUrl).toBe("https://pay.example.com/epay/api.php");
-        expect(params.pid).toBe("1001");
-        expect(params.key).toBe("secret");
-        expect(params.trade_no).toBe("TRADE_1");
-        expect(params.money).toBe("10.00");
+        await expect(refundOrder("TRADE_1", "10.00")).rejects.toThrow(/未启用/);
+        expect(fetchMock).not.toHaveBeenCalled();
+      }
+    );
+  });
+
+  it("server 模式即使配置代理也应直连官方地址", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({ code: 1, msg: "退款成功" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })
+    );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await withEnv(
+      {
+        LDC_CLIENT_ID: "1001",
+        LDC_CLIENT_SECRET: "secret",
+        LDC_GATEWAY: "https://pay.example.com/epay",
+        LDC_PROXY_URL: "https://proxy.example.com/api.php",
+        LDC_REFUND_MODE: "server",
+      },
+      async () => {
+        await refundOrder("TRADE_1", "10.00");
+        expect(fetchMock.mock.calls[0]?.[0]).toBe(
+          "https://pay.example.com/epay/api.php"
+        );
+      }
+    );
+  });
+
+  it("应将退款请求超时转换为明确错误", async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockRejectedValueOnce(new DOMException("timed out", "TimeoutError")) as unknown as typeof fetch;
+
+    await withEnv(
+      {
+        LDC_CLIENT_ID: "1001",
+        LDC_CLIENT_SECRET: "secret",
+        LDC_REFUND_MODE: "server",
+      },
+      async () => {
+        await expect(refundOrder("TRADE_1", "10.00")).rejects.toThrow(/超时/);
+      }
+    );
+  });
+
+  it("应拒绝结构不完整的退款响应", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({ code: 1 }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })
+    ) as unknown as typeof fetch;
+
+    await withEnv(
+      {
+        LDC_CLIENT_ID: "1001",
+        LDC_CLIENT_SECRET: "secret",
+        LDC_REFUND_MODE: "server",
+      },
+      async () => {
+        await expect(refundOrder("TRADE_1", "10.00")).rejects.toThrow(/响应格式/);
+      }
+    );
+  });
+
+  it("应保留平台明确业务失败结果", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({ code: -1, msg: "余额不足" }), {
+        status: 400,
+        headers: { "content-type": "application/json" },
+      })
+    ) as unknown as typeof fetch;
+
+    await withEnv(
+      {
+        LDC_CLIENT_ID: "1001",
+        LDC_CLIENT_SECRET: "secret",
+        LDC_REFUND_MODE: "server",
+      },
+      async () => {
+        await expect(refundOrder("TRADE_1", "10.00")).resolves.toEqual({
+          code: -1,
+          msg: "余额不足",
+        });
+      }
+    );
+  });
+
+  it("应在发请求前拒绝非法退款流水号或金额", async () => {
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await withEnv(
+      {
+        LDC_CLIENT_ID: "1001",
+        LDC_CLIENT_SECRET: "secret",
+        LDC_REFUND_MODE: "server",
+      },
+      async () => {
+        await expect(refundOrder("", "10.00")).rejects.toThrow(/流水号/);
+        await expect(refundOrder("TRADE_1", "10.0")).rejects.toThrow(/金额/);
+        expect(fetchMock).not.toHaveBeenCalled();
       }
     );
   });
 });
-

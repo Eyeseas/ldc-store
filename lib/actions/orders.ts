@@ -11,7 +11,7 @@
  */
 
 import { db, orders, cards, products } from "@/lib/db";
-import { eq, and, sql, desc, inArray } from "drizzle-orm";
+import { eq, and, sql, desc, inArray, isNull, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { headers } from "next/headers";
 import { after } from "next/server";
@@ -20,12 +20,9 @@ import {
   createPayment,
   refundOrder,
   isRefundEnabled,
-  getRefundMode,
-  getClientRefundParams,
   queryPaymentOrder,
+  getPaymentProtocol,
   type PaymentFormData,
-  type RefundMode,
-  type ClientRefundParams,
 } from "@/lib/payment/ldc";
 import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
@@ -33,7 +30,7 @@ import { requireAdmin } from "@/lib/auth-utils";
 import { getExpireTime } from "@/lib/time";
 import { getSystemSettings, getTelegramConfigWithToggles } from "@/lib/actions/system-settings";
 import { logger, getRequestIdFromHeaders } from "@/lib/logger";
-import { parseWalletAmount } from "@/lib/money";
+import { multiplyMoney, parseMoneyToCents } from "@/lib/money";
 import {
   sendNewOrderNotification,
   sendPaymentSuccessNotification,
@@ -112,6 +109,9 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
   try {
     log.info({ userId: user.id, productId, quantity, paymentMethod }, "开始创建订单");
 
+    const paymentProtocol =
+      paymentMethod === "ldc" ? getPaymentProtocol() : "epay";
+
     // 2.1 释放过期订单，确保库存准确（懒加载策略）
     await releaseExpiredOrders();
     
@@ -150,7 +150,10 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
 
       const cardIds = availableCards.map((c) => c.id);
       const orderNo = generateOrderNo();
-      const totalAmount = parseFloat(product.price) * quantity;
+      const totalAmount = multiplyMoney(product.price, quantity);
+      if (!totalAmount) {
+        throw new Error("商品金额格式无效");
+      }
       // 计算订单过期时间（UTC 时间戳，存入数据库时自动转换）
       const expiredAt = getExpireTime(orderExpireMinutes);
 
@@ -163,8 +166,9 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
           productName: product.name,
           productPrice: product.price,
           quantity,
-          totalAmount: totalAmount.toFixed(2),
+          totalAmount,
           paymentMethod,
+          paymentProtocol,
           userId: user.id,
           username: user.username,
           userImage: user.image || null,
@@ -240,7 +244,7 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
           orderNo: result.order.orderNo,
           productName: product.name,
           quantity,
-          totalAmount: result.totalAmount.toFixed(2),
+          totalAmount: result.totalAmount,
           paymentMethod,
           username: user.username || null,
           createdAt: result.order.createdAt,
@@ -579,12 +583,6 @@ export async function getOrderByNo(orderNo: string) {
 
     const userId = user.id;
 
-    function toCents(value: string): number | null {
-      const amount = parseWalletAmount(value);
-      if (amount === null) return null;
-      return Math.round(amount * 100);
-    }
-
     const fetchOrder = () =>
       db.query.orders.findFirst({
         where: and(eq(orders.orderNo, orderNo), eq(orders.userId, userId)),
@@ -611,10 +609,28 @@ export async function getOrderByNo(orderNo: string) {
       try {
         const remote = await queryPaymentOrder({ outTradeNo: order.orderNo });
         if (remote && Number(remote.status) === 1) {
-          const expectedCents = toCents(order.totalAmount);
-          const receivedCents = toCents(remote.money);
+          const expectedCents = parseMoneyToCents(order.totalAmount);
+          const receivedCents = parseMoneyToCents(remote.money);
 
-          if (expectedCents === null || receivedCents === null || expectedCents !== receivedCents) {
+          if (
+            remote.out_trade_no !== order.orderNo ||
+            remote.type !== order.paymentProtocol
+          ) {
+            log.warn(
+              {
+                expectedOrderNo: order.orderNo,
+                receivedOrderNo: remote.out_trade_no,
+                expectedProtocol: order.paymentProtocol,
+                receivedProtocol: remote.type,
+                remoteTradeNo: remote.trade_no,
+              },
+              "支付结果补偿查询订单或协议不匹配"
+            );
+          } else if (
+            expectedCents === null ||
+            receivedCents === null ||
+            expectedCents !== receivedCents
+          ) {
             log.warn(
               {
                 expected: order.totalAmount,
@@ -847,21 +863,21 @@ export async function requestRefund(
 /**
  * 管理员审批退款 - 通过
  * 调用 LDC 退款接口完成退款
- * 需要配置 LDC_PROXY_URL 才能使用退款功能
+ * 需要显式启用服务端直连或代理退款模式
  */
 export async function approveRefund(
   orderId: string,
   adminRemark?: string
 ): Promise<{ success: boolean; message: string }> {
-  // 检查退款功能是否启用
-  if (!isRefundEnabled()) {
-    return { success: false, message: "退款功能未启用，请配置 LDC_PROXY_URL" };
-  }
-
+  let admin: Awaited<ReturnType<typeof requireAdmin>>;
   try {
-    await requireAdmin();
+    admin = await requireAdmin();
   } catch {
     return { success: false, message: "需要管理员权限" };
+  }
+
+  if (!isRefundEnabled()) {
+    return { success: false, message: "退款功能未启用，请配置 LDC_REFUND_MODE" };
   }
 
   try {
@@ -878,9 +894,31 @@ export async function approveRefund(
       return { success: false, message: "订单不存在" };
     }
 
+    if (order.status === "refunded") {
+      log.info({ orderNo: order.orderNo }, "审批退款：订单已退款，按幂等请求处理");
+      return { success: true, message: "该订单已退款" };
+    }
+
     if (order.status !== "refund_pending") {
       log.warn({ status: order.status, orderNo: order.orderNo }, "审批退款：订单状态不允许");
       return { success: false, message: "该订单不在退款审核中" };
+    }
+
+    if (
+      order.refundAttemptStatus === "processing" ||
+      order.refundAttemptStatus === "uncertain"
+    ) {
+      log.warn(
+        { orderNo: order.orderNo, refundAttemptStatus: order.refundAttemptStatus },
+        "审批退款：已有退款正在处理或结果不确定"
+      );
+      return {
+        success: false,
+        message:
+          order.refundAttemptStatus === "processing"
+            ? "退款正在处理中，请勿重复操作"
+            : "退款结果待人工核对，禁止自动重试",
+      };
     }
 
     if (!order.tradeNo) {
@@ -888,39 +926,133 @@ export async function approveRefund(
       return { success: false, message: "订单缺少支付流水号，无法退款" };
     }
 
-    // 调用 LDC 退款接口
-    const refundResult = await refundOrder(order.tradeNo, order.totalAmount);
+    const attemptedAt = new Date();
+    const [claimed] = await db
+      .update(orders)
+      .set({
+        refundAttemptStatus: "processing",
+        refundAttemptedAt: attemptedAt,
+        refundAttemptedBy: admin.user.id,
+        refundResponseCode: null,
+        refundResponseMessage: null,
+        updatedAt: attemptedAt,
+      })
+      .where(
+        and(
+          eq(orders.id, orderId),
+          eq(orders.status, "refund_pending"),
+          or(
+            isNull(orders.refundAttemptStatus),
+            eq(orders.refundAttemptStatus, "failed")
+          )
+        )
+      )
+      .returning({ id: orders.id });
+
+    if (!claimed) {
+      return { success: false, message: "退款已由其他请求处理，请刷新后重试" };
+    }
+
+    let refundResult: Awaited<ReturnType<typeof refundOrder>>;
+    try {
+      refundResult = await refundOrder(order.tradeNo, order.totalAmount);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "未知退款错误";
+      await db
+        .update(orders)
+        .set({
+          refundAttemptStatus: "uncertain",
+          refundResponseMessage: message.slice(0, 500),
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(orders.id, orderId),
+            eq(orders.refundAttemptStatus, "processing")
+          )
+        );
+      throw new Error(`退款结果不确定，需人工核对: ${message}`, { cause: error });
+    }
 
     if (refundResult.code !== 1) {
       log.error(
         { refundCode: refundResult.code, refundMsg: refundResult.msg, orderNo: order.orderNo },
         "LDC 退款接口返回错误"
       );
-      return { 
-        success: false, 
-        message: `退款失败: ${refundResult.msg || "支付平台返回错误"}` 
+      await db
+        .update(orders)
+        .set({
+          refundAttemptStatus: "failed",
+          refundResponseCode: refundResult.code,
+          refundResponseMessage: refundResult.msg.slice(0, 500),
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(orders.id, orderId),
+            eq(orders.refundAttemptStatus, "processing")
+          )
+        );
+      return {
+        success: false,
+        message: `退款失败: ${refundResult.msg || "支付平台返回错误"}`,
       };
     }
 
-    // 更新订单状态
-    await db
-      .update(orders)
-      .set({
-        status: "refunded",
-        adminRemark: adminRemark || "退款已通过",
-        refundedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(orders.id, orderId));
+    try {
+      await db.transaction(async (tx) => {
+        const [updatedOrder] = await tx
+          .update(orders)
+          .set({
+            status: "refunded",
+            refundAttemptStatus: "succeeded",
+            refundResponseCode: refundResult.code,
+            refundResponseMessage: refundResult.msg.slice(0, 500),
+            adminRemark: adminRemark || "退款已通过",
+            refundedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(orders.id, orderId),
+              eq(orders.status, "refund_pending"),
+              eq(orders.refundAttemptStatus, "processing")
+            )
+          )
+          .returning({ id: orders.id });
 
-    // 退款后将卡密标记为 refunded（保留 orderId、soldAt 用于溯源）
-    // 仅管理员可通过"重新上架"清空关联并改为 available
-    await db
-      .update(cards)
-      .set({
-        status: "refunded",
-      })
-      .where(eq(cards.orderId, orderId));
+        if (!updatedOrder) {
+          throw new Error("退款订单状态已发生变化");
+        }
+
+        // 保留 orderId、soldAt 用于溯源，仅管理员可重新上架。
+        await tx
+          .update(cards)
+          .set({
+            status: "refunded",
+          })
+          .where(eq(cards.orderId, orderId));
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "本地事务失败";
+      await db
+        .update(orders)
+        .set({
+          refundAttemptStatus: "uncertain",
+          refundResponseCode: refundResult.code,
+          refundResponseMessage: `平台退款成功，本地提交失败: ${message}`.slice(0, 500),
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(orders.id, orderId),
+            eq(orders.refundAttemptStatus, "processing")
+          )
+        );
+      throw new Error("平台退款成功，但本地状态提交失败，需人工核对", {
+        cause: error,
+      });
+    }
 
     revalidatePath("/admin/orders");
     revalidatePath("/order/my");
@@ -1066,154 +1198,4 @@ export async function getRefundOrders() {
  */
 export async function getRefundEnabled(): Promise<boolean> {
   return isRefundEnabled();
-}
-
-/**
- * 获取退款模式
- */
-export async function getOrderRefundMode(): Promise<RefundMode> {
-  return getRefundMode();
-}
-
-/**
- * 获取客户端退款所需的参数
- * 用于客户端模式下，前端直接调用 LDC API
- */
-export async function getClientRefundData(
-  orderId: string
-): Promise<{ 
-  success: boolean; 
-  message: string; 
-  data?: ClientRefundParams;
-}> {
-  try {
-    await requireAdmin();
-  } catch {
-    return { success: false, message: "需要管理员权限" };
-  }
-
-  const mode = getRefundMode();
-  if (mode !== 'client') {
-    return { success: false, message: "当前不是客户端退款模式" };
-  }
-
-  try {
-    const requestId = await getRequestIdFromHeaders();
-    const log = logger.child({ requestId, action: "getClientRefundData", orderId });
-
-    const order = await db.query.orders.findFirst({
-      where: eq(orders.id, orderId),
-    });
-
-    if (!order) {
-      log.warn("获取客户端退款参数：订单不存在");
-      return { success: false, message: "订单不存在" };
-    }
-
-    if (order.status !== "refund_pending") {
-      log.warn({ status: order.status, orderNo: order.orderNo }, "获取客户端退款参数：订单状态不允许");
-      return { success: false, message: "该订单不在退款审核中" };
-    }
-
-    if (!order.tradeNo) {
-      log.error({ orderNo: order.orderNo }, "获取客户端退款参数：缺少 tradeNo");
-      return { success: false, message: "订单缺少支付流水号，无法退款" };
-    }
-
-    const params = getClientRefundParams(order.tradeNo, order.totalAmount);
-    log.info({ orderNo: order.orderNo }, "获取客户端退款参数成功");
-    return { success: true, message: "获取成功", data: params };
-  } catch (error) {
-    logger.error({ err: error, action: "getClientRefundData", orderId }, "获取客户端退款参数失败");
-    return {
-      success: false,
-      message: error instanceof Error ? error.message : "获取退款参数失败",
-    };
-  }
-}
-
-/**
- * 客户端退款成功后标记订单已退款
- * 用于客户端模式下，前端调用 LDC API 成功后更新数据库
- */
-export async function markOrderRefunded(
-  orderId: string,
-  adminRemark?: string
-): Promise<{ success: boolean; message: string }> {
-  try {
-    await requireAdmin();
-  } catch {
-    return { success: false, message: "需要管理员权限" };
-  }
-
-  try {
-    const requestId = await getRequestIdFromHeaders();
-    const log = logger.child({ requestId, action: "markOrderRefunded", orderId });
-
-    const order = await db.query.orders.findFirst({
-      where: eq(orders.id, orderId),
-    });
-
-    if (!order) {
-      log.warn("标记退款：订单不存在");
-      return { success: false, message: "订单不存在" };
-    }
-
-    if (order.status !== "refund_pending") {
-      log.warn({ status: order.status, orderNo: order.orderNo }, "标记退款：订单状态不允许");
-      return { success: false, message: "该订单不在退款审核中" };
-    }
-
-    // 更新订单状态
-    await db
-      .update(orders)
-      .set({
-        status: "refunded",
-        adminRemark: adminRemark || "退款已通过（客户端模式）",
-        refundedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(orders.id, orderId));
-
-    // 退款后将卡密标记为 refunded（保留 orderId、soldAt 用于溯源）
-    // 仅管理员可通过"重新上架"清空关联并改为 available
-    await db
-      .update(cards)
-      .set({
-        status: "refunded",
-      })
-      .where(eq(cards.orderId, orderId));
-
-    revalidatePath("/admin/orders");
-    revalidatePath("/order/my");
-
-    after(async () => {
-      try {
-        const config = await getTelegramConfigWithToggles();
-        const payload: RefundApprovedNotificationPayload = {
-          orderNo: order.orderNo,
-          productName: order.productName,
-          quantity: order.quantity,
-          totalAmount: order.totalAmount,
-          paymentMethod: order.paymentMethod,
-          username: order.username,
-          tradeNo: order.tradeNo,
-          refundedAt: new Date(),
-          adminRemark: adminRemark || null,
-        };
-        await sendRefundApprovedNotification(config, payload);
-      } catch (e) {
-        console.error("[Telegram] 退款成功通知发送失败:", e);
-      }
-    });
-
-    log.info({ orderNo: order.orderNo, tradeNo: order.tradeNo }, "订单已标记为已退款");
-    return { success: true, message: "订单状态已更新为已退款" };
-  } catch (error) {
-    logger.error({ err: error, action: "markOrderRefunded", orderId }, "标记订单已退款失败");
-    return {
-      success: false,
-      message: error instanceof Error ? error.message : "操作失败",
-    };
-  }
 }

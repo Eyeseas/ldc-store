@@ -4,18 +4,16 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { verifySign, type NotifyParams } from "@/lib/payment/ldc";
+import {
+  parseNotifyParams,
+  verifySign,
+  type NotifyParams,
+} from "@/lib/payment/ldc";
 import { handlePaymentSuccess } from "@/lib/actions/orders";
 import { db, orders } from "@/lib/db";
 import { eq } from "drizzle-orm";
 import { logger } from "@/lib/logger";
-import { parseWalletAmount } from "@/lib/money";
-
-function toCents(value: string): number | null {
-  const amount = parseWalletAmount(value);
-  if (amount === null) return null;
-  return Math.round(amount * 100);
-}
+import { parseMoneyToCents } from "@/lib/money";
 
 function getRequestId(request: NextRequest): string {
   return request.headers.get("x-request-id") || crypto.randomUUID();
@@ -43,7 +41,7 @@ export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
 
   // 提取回调参数
-  const params: NotifyParams = {
+  const rawParams = {
     pid: searchParams.get("pid") || "",
     trade_no: searchParams.get("trade_no") || "",
     out_trade_no: searchParams.get("out_trade_no") || "",
@@ -54,15 +52,19 @@ export async function GET(request: NextRequest) {
     sign_type: searchParams.get("sign_type") || "",
     sign: searchParams.get("sign") || "",
   };
+  const params = parseNotifyParams(rawParams);
 
-  // 验证必要参数
-  if (!params.out_trade_no || !params.sign || !params.pid || !params.trade_no || !params.money) {
+  if (!params) {
     log.warn(
       {
         durationMs: Date.now() - startTime,
-        params: toSafeNotifyLogFields(params),
+        orderNo: rawParams.out_trade_no,
+        tradeNo: rawParams.trade_no,
+        pid: rawParams.pid,
+        paymentType: rawParams.type,
+        tradeStatus: rawParams.trade_status,
       },
-      "支付回调缺少必要参数"
+      "支付回调参数格式无效"
     );
     return new NextResponse("fail", { status: 400 });
   }
@@ -118,6 +120,18 @@ export async function GET(request: NextRequest) {
     return new NextResponse("fail", { status: 400 });
   }
 
+  if (params.trade_status !== "TRADE_SUCCESS") {
+    log.warn(
+      {
+        durationMs: Date.now() - startTime,
+        tradeStatus: params.trade_status,
+        params: toSafeNotifyLogFields(params),
+      },
+      "支付回调交易状态不支持"
+    );
+    return new NextResponse("fail", { status: 400 });
+  }
+
   // 验证订单与金额（防御式校验）
   const order = await db.query.orders.findFirst({
     where: eq(orders.orderNo, params.out_trade_no),
@@ -153,8 +167,8 @@ export async function GET(request: NextRequest) {
     return new NextResponse("fail", { status: 400 });
   }
 
-  const expectedCents = toCents(order.totalAmount);
-  const receivedCents = toCents(params.money);
+  const expectedCents = parseMoneyToCents(order.totalAmount);
+  const receivedCents = parseMoneyToCents(params.money);
   if (expectedCents === null || receivedCents === null || expectedCents !== receivedCents) {
     log.warn(
       {
@@ -168,7 +182,25 @@ export async function GET(request: NextRequest) {
     return new NextResponse("fail", { status: 400 });
   }
 
-  // 幂等：订单已处理则直接确认成功，避免支付平台重复通知
+  if (
+    (order.status === "completed" || order.status === "paid") &&
+    order.tradeNo &&
+    order.tradeNo !== params.trade_no
+  ) {
+    log.error(
+      {
+        durationMs: Date.now() - startTime,
+        orderId: order.id,
+        storedTradeNo: order.tradeNo,
+        receivedTradeNo: params.trade_no,
+        params: toSafeNotifyLogFields(params),
+      },
+      "支付回调交易号与已完成订单不一致"
+    );
+    return new NextResponse("fail", { status: 409 });
+  }
+
+  // 幂等：订单已处理且交易号一致时直接确认成功，避免支付平台重复通知
   if (order.status === "completed" || order.status === "paid") {
     log.info(
       {
@@ -182,24 +214,33 @@ export async function GET(request: NextRequest) {
     return new NextResponse("success");
   }
 
-  // 验证交易状态
-  if (params.trade_status !== "TRADE_SUCCESS") {
-    log.info(
-      {
-        durationMs: Date.now() - startTime,
-        orderId: order.id,
-        orderStatus: order.status,
-        tradeStatus: params.trade_status,
-        params: toSafeNotifyLogFields(params),
-      },
-      "交易状态非成功"
-    );
-    return new NextResponse("success");
-  }
-
-  // 非待支付状态不再重复处理（例如 expired/refunded）
+  // 已过期、退款中或已退款订单收到成功通知时必须告警并要求平台重试。
   if (order.status !== "pending") {
-    log.warn(
+    try {
+      await db
+        .update(orders)
+        .set({
+          paymentReviewReason: `late_payment:${order.status}`,
+          paymentReviewTradeNo: params.trade_no,
+          paymentReviewAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(orders.id, order.id));
+    } catch (error) {
+      log.error(
+        {
+          durationMs: Date.now() - startTime,
+          orderId: order.id,
+          orderStatus: order.status,
+          err: error,
+          params: toSafeNotifyLogFields(params),
+        },
+        "支付回调人工核对记录写入失败"
+      );
+      return new NextResponse("fail", { status: 500 });
+    }
+
+    log.error(
       {
         durationMs: Date.now() - startTime,
         orderId: order.id,
@@ -208,7 +249,7 @@ export async function GET(request: NextRequest) {
       },
       "支付回调订单状态不可处理"
     );
-    return new NextResponse("success");
+    return new NextResponse("fail", { status: 409 });
   }
 
   // 处理支付成功

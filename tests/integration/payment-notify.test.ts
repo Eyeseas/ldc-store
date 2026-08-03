@@ -5,6 +5,8 @@ import { withEnv } from "@/tests/utils";
 
 const dbMocks = vi.hoisted(() => ({
   findFirst: vi.fn(),
+  update: vi.fn(),
+  updateSets: [] as Array<Record<string, unknown>>,
 }));
 
 // 关键：route handler 会读取 lib/db，从而触发 DATABASE_URL 校验；测试必须 mock 掉
@@ -15,10 +17,12 @@ vi.mock("@/lib/db", () => ({
         findFirst: (...args: unknown[]) => dbMocks.findFirst(...args),
       },
     },
+    update: (...args: unknown[]) => dbMocks.update(...args),
   },
   orders: {
     // 仅用于构建 where 条件（本测试不关心真实 column 对象）
     orderNo: {},
+    id: {},
   },
 }));
 
@@ -100,6 +104,14 @@ function makeSignedQuery(input: NotifyBase, secret: string): Record<string, stri
 
 beforeEach(() => {
   dbMocks.findFirst.mockReset();
+  dbMocks.update.mockReset();
+  dbMocks.updateSets.length = 0;
+  dbMocks.update.mockImplementation(() => ({
+    set: (value: Record<string, unknown>) => {
+      dbMocks.updateSets.push(value);
+      return { where: vi.fn().mockResolvedValue(undefined) };
+    },
+  }));
   actionMocks.handlePaymentSuccess.mockReset();
   loggerMocks.info.mockReset();
   loggerMocks.warn.mockReset();
@@ -209,6 +221,29 @@ describe("/api/payment/notify", () => {
     );
   });
 
+  it("应在查库前拒绝非法金额格式", async () => {
+    await withEnv(
+      { LDC_CLIENT_ID: "1001", LDC_CLIENT_SECRET: "secret" },
+      async () => {
+        const base: NotifyBase = {
+          pid: "1001",
+          trade_no: "TRADE_1",
+          out_trade_no: "ORDER_1",
+          type: "epay",
+          name: "Test",
+          money: "1e1",
+          trade_status: "TRADE_SUCCESS",
+        };
+
+        const response = await GET(makeRequest(makeSignedQuery(base, "secret")));
+
+        expect(response.status).toBe(400);
+        expect(await response.text()).toBe("fail");
+        expect(dbMocks.findFirst).not.toHaveBeenCalled();
+      }
+    );
+  });
+
   it("应对重复回调保持幂等（已 paid/completed 直接 success）", async () => {
     await withEnv(
       { LDC_CLIENT_ID: "1001", LDC_CLIENT_SECRET: "secret" },
@@ -240,7 +275,7 @@ describe("/api/payment/notify", () => {
     );
   });
 
-  it("trade_status 非成功时应返回 success 但不处理订单", async () => {
+  it("trade_status 非成功时应拒绝且不处理订单", async () => {
     await withEnv(
       { LDC_CLIENT_ID: "1001", LDC_CLIENT_SECRET: "secret" },
       async () => {
@@ -264,8 +299,78 @@ describe("/api/payment/notify", () => {
 
         const response = await GET(makeRequest(makeSignedQuery(base, "secret")));
 
-        expect(response.status).toBe(200);
-        expect(await response.text()).toBe("success");
+        expect(response.status).toBe(400);
+        expect(await response.text()).toBe("fail");
+        expect(actionMocks.handlePaymentSuccess).not.toHaveBeenCalled();
+      }
+    );
+  });
+
+  it("已完成订单的 trade_no 不一致时应拒绝重复回调", async () => {
+    await withEnv(
+      { LDC_CLIENT_ID: "1001", LDC_CLIENT_SECRET: "secret" },
+      async () => {
+        dbMocks.findFirst.mockResolvedValueOnce({
+          id: "o1",
+          status: "completed",
+          totalAmount: "10.00",
+          paymentMethod: "ldc",
+          tradeNo: "TRADE_EXISTING",
+        });
+
+        const base: NotifyBase = {
+          pid: "1001",
+          trade_no: "TRADE_OTHER",
+          out_trade_no: "ORDER_1",
+          type: "epay",
+          name: "Test",
+          money: "10.00",
+          trade_status: "TRADE_SUCCESS",
+        };
+
+        const response = await GET(makeRequest(makeSignedQuery(base, "secret")));
+
+        expect(response.status).toBe(409);
+        expect(await response.text()).toBe("fail");
+        expect(actionMocks.handlePaymentSuccess).not.toHaveBeenCalled();
+      }
+    );
+  });
+
+  it("过期订单收到成功通知时应返回 fail 并记录错误", async () => {
+    await withEnv(
+      { LDC_CLIENT_ID: "1001", LDC_CLIENT_SECRET: "secret" },
+      async () => {
+        dbMocks.findFirst.mockResolvedValueOnce({
+          id: "o1",
+          status: "expired",
+          totalAmount: "10.00",
+          paymentMethod: "ldc",
+          tradeNo: null,
+        });
+
+        const base: NotifyBase = {
+          pid: "1001",
+          trade_no: "TRADE_1",
+          out_trade_no: "ORDER_1",
+          type: "epay",
+          name: "Test",
+          money: "10.00",
+          trade_status: "TRADE_SUCCESS",
+        };
+
+        const response = await GET(makeRequest(makeSignedQuery(base, "secret")));
+
+        expect(response.status).toBe(409);
+        expect(await response.text()).toBe("fail");
+        expect(loggerMocks.error).toHaveBeenCalled();
+        expect(dbMocks.updateSets).toEqual([
+          expect.objectContaining({
+            paymentReviewReason: "late_payment:expired",
+            paymentReviewTradeNo: "TRADE_1",
+            paymentReviewAt: expect.any(Date),
+          }),
+        ]);
         expect(actionMocks.handlePaymentSuccess).not.toHaveBeenCalled();
       }
     );
@@ -304,4 +409,3 @@ describe("/api/payment/notify", () => {
     );
   });
 });
-

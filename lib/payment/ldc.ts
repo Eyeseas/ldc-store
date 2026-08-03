@@ -3,171 +3,68 @@
  * 基于 EasyPay 兼容协议
  */
 
-import crypto from "crypto";
+import { formatCents, parseMoneyToCents } from "@/lib/money";
+import {
+  getCredentials,
+  getGatewayUrl,
+  getPaymentProtocol,
+  getQueryApiUrl,
+  getRefundApiUrl,
+  getRefundMode,
+} from "./ldc/config";
+import {
+  generateEd25519Sign,
+  generateSign,
+  verifySign,
+} from "./ldc/signatures";
+import {
+  isLikelyCloudflareBlock,
+  orderQueryResultSchema,
+  refundResultSchema,
+} from "./ldc/schemas";
+import type {
+  LdcPayParams,
+  NotifyParams,
+  OrderQueryResult,
+  PaymentFormData,
+  PaymentParams,
+  RefundResult,
+} from "./ldc/types";
+import { LdcPaymentError } from "./ldc/errors";
 
-/**
- * 退款模式
- * - 'proxy': 使用服务端代理（需配置 LDC_PROXY_URL）
- * - 'client': 客户端直接调用（通过浏览器绕过 CF）
- * - 'disabled': 禁用退款
- */
-export type RefundMode = 'proxy' | 'client' | 'disabled';
+export {
+  getPaymentProtocol,
+  getRefundMode,
+  isRefundEnabled,
+} from "./ldc/config";
+export { generateSign, verifySign } from "./ldc/signatures";
+export { parseNotifyParams } from "./ldc/schemas";
+export { LdcPaymentError } from "./ldc/errors";
+export type { LdcPaymentErrorCode } from "./ldc/errors";
+export type {
+  NotifyParams,
+  OrderQueryResult,
+  PaymentFormData,
+  PaymentParams,
+  PaymentProtocol,
+  RefundMode,
+} from "./ldc/types";
 
-/**
- * 获取退款模式
- * 优先使用代理模式，如果没有代理则启用客户端模式
- * 可通过 LDC_REFUND_MODE 环境变量强制指定模式：proxy / client / disabled
- */
-export function getRefundMode(): RefundMode {
-  const envMode = process.env.LDC_REFUND_MODE?.toLowerCase();
-  
-  if (envMode === 'disabled') {
-    return 'disabled';
-  }
-  
-  if (envMode === 'client') {
-    return 'client';
-  }
-  
-  if (process.env.LDC_PROXY_URL) {
-    return 'proxy';
-  }
-  
-  // 默认启用客户端模式（无需代理）
-  return 'client';
+function createTimeoutSignal(): AbortSignal | undefined {
+  return typeof AbortSignal !== "undefined" &&
+    typeof (AbortSignal as unknown as { timeout?: unknown }).timeout === "function"
+    ? (AbortSignal as unknown as { timeout: (ms: number) => AbortSignal }).timeout(
+        10_000
+      )
+    : undefined;
 }
 
-/**
- * 检查是否启用退款功能
- * 兼容旧版本逻辑
- */
-export function isRefundEnabled(): boolean {
-  return getRefundMode() !== 'disabled';
-}
-
-/**
- * 获取 API 端点 URL
- * 如果设置了 LDC_PROXY_URL 环境变量，则使用代理地址
- * 否则使用官方的 /api.php 接口
- */
-function getApiUrl(): string {
-  const proxyUrl = process.env.LDC_PROXY_URL;
-  if (proxyUrl) {
-    // 使用代理地址
-    return proxyUrl.replace(/\/+$/, ""); // 移除末尾斜杠
-  }
-  
-  // 使用官方接口
-  let gateway = process.env.LDC_GATEWAY || "https://credit.linux.do/epay";
-  gateway = gateway.replace(/\/+$/, "");
-  if (!gateway.includes("/epay")) {
-    gateway = gateway + "/epay";
-  }
-  return `${gateway}/api.php`;
-}
-
-interface PaymentParams {
-  pid: string;
-  type: string;
-  out_trade_no: string;
-  name: string;
-  money: string;
-  notify_url?: string;
-  return_url?: string;
-  device?: string;
-}
-
-interface NotifyParams {
-  pid: string;
-  trade_no: string;
-  out_trade_no: string;
-  type: string;
-  name: string;
-  money: string;
-  trade_status: string;
-  sign_type: string;
-  sign: string;
-}
-
-interface OrderQueryResult {
-  code: number;
-  msg: string;
-  trade_no: string;
-  out_trade_no: string;
-  type: string;
-  pid: string;
-  addtime: string;
-  endtime: string;
-  name: string;
-  money: string;
-  status: number;
-}
-
-function isLikelyCloudflareBlock(html: string): boolean {
-  const text = html.toLowerCase();
-  return text.includes("just a moment") || text.includes("cloudflare");
-}
-
-/**
- * 生成签名
- * 1. 取所有非空字段（排除 sign、sign_type）
- * 2. 按 ASCII 升序排列
- * 3. 拼接成 k1=v1&k2=v2 格式
- * 4. 末尾追加密钥后 MD5
- */
-export function generateSign(
-  params: Record<string, string | undefined>,
-  secret: string
-): string {
-  // 过滤空值，排除 sign 和 sign_type
-  const filteredParams = Object.entries(params)
-    .filter(
-      ([key, value]) =>
-        value !== undefined &&
-        value !== "" &&
-        key !== "sign" &&
-        key !== "sign_type"
-    )
-    .sort(([a], [b]) => a.localeCompare(b));
-
-  // 拼接成 k1=v1&k2=v2 格式
-  const queryString = filteredParams
-    .map(([key, value]) => `${key}=${value}`)
-    .join("&");
-
-  // 追加密钥并 MD5
-  const signStr = queryString + secret;
-  return crypto.createHash("md5").update(signStr).digest("hex");
-}
-
-/**
- * 验证回调签名
- */
-export function verifySign(params: NotifyParams, secret: string): boolean {
-  const { sign, sign_type, ...rest } = params;
-
-  // 过滤空值并排序
-  const sortedParams = Object.entries(rest)
-    .filter(([, value]) => value !== undefined && value !== "")
-    .sort(([a], [b]) => a.localeCompare(b));
-
-  // 拼接字符串
-  const queryString = sortedParams
-    .map(([key, value]) => `${key}=${value}`)
-    .join("&");
-
-  // 计算签名
-  const expectedSign = crypto
-    .createHash("md5")
-    .update(queryString + secret)
-    .digest("hex");
-
-  return sign === expectedSign;
-}
-
-export interface PaymentFormData {
-  actionUrl: string;
-  params: Record<string, string>;
+function isTimeoutError(error: unknown): boolean {
+  const errorName =
+    typeof error === "object" && error !== null && "name" in error
+      ? String(error.name)
+      : "";
+  return errorName === "TimeoutError" || errorName === "AbortError";
 }
 
 /**
@@ -180,46 +77,76 @@ export interface PaymentFormData {
  */
 export function createPayment(
   orderId: string,
-  amount: number,
+  amount: string,
   productName: string,
   siteUrl: string
 ): PaymentFormData {
-  let gateway = process.env.LDC_GATEWAY || "https://credit.linux.do/epay";
-  const pid = process.env.LDC_CLIENT_ID;
-  const secret = process.env.LDC_CLIENT_SECRET;
+  const protocol = getPaymentProtocol();
+  const gateway = getGatewayUrl();
+  const { clientId: pid, secret } = getCredentials();
 
-  if (!pid || !secret) {
-    throw new Error("支付配置未设置：请在 .env 文件中配置 LDC_CLIENT_ID 和 LDC_CLIENT_SECRET");
+  const amountCents = parseMoneyToCents(amount);
+  const normalizedAmount =
+    amountCents !== null && amountCents > 0 ? formatCents(amountCents) : null;
+  if (!normalizedAmount) {
+    throw new LdcPaymentError("INVALID_INPUT", "支付金额格式无效");
+  }
+  const normalizedProductName = Array.from(productName).slice(0, 64).join("");
+  if (!normalizedProductName.trim()) {
+    throw new LdcPaymentError("INVALID_INPUT", "支付商品名称不能为空");
   }
 
-  // 确保网关地址格式正确
-  gateway = gateway.replace(/\/+$/, ""); // 移除末尾斜杠
-  if (!gateway.includes("/epay")) {
-    gateway = gateway + "/epay";
-  }
-
-  const params: PaymentParams = {
-    pid,
-    type: "epay",
+  const common = {
     out_trade_no: orderId,
-    name: productName.slice(0, 64), // 最多 64 字符
-    money: amount.toFixed(2),
+    money: normalizedAmount,
     notify_url: `${siteUrl}/api/payment/notify`,
     return_url: `${siteUrl}/order/result?out_trade_no=${orderId}`,
   };
 
-  const sign = generateSign(params as unknown as Record<string, string>, secret);
+  let formParams: Record<string, string>;
+  if (protocol === "ldcpay") {
+    const privateKey = process.env.LDC_ED25519_PRIVATE_KEY_PKCS8_BASE64;
+    if (!privateKey) {
+      throw new LdcPaymentError(
+        "CONFIG",
+        "支付配置未设置：ldcpay 需要 LDC_ED25519_PRIVATE_KEY_PKCS8_BASE64"
+      );
+    }
 
-  const formParams = {
-    ...params,
-    sign,
-    sign_type: "MD5",
-  } as Record<string, string>;
+    const params: LdcPayParams = {
+      client_id: pid,
+      type: "ldcpay",
+      ...common,
+      order_name: normalizedProductName,
+    };
+    formParams = {
+      ...params,
+      sign: generateEd25519Sign(
+        params as unknown as Record<string, string>,
+        secret,
+        privateKey
+      ),
+    };
+  } else {
+    const params: PaymentParams = {
+      pid,
+      type: "epay",
+      ...common,
+      name: normalizedProductName,
+    };
+    formParams = {
+      ...params,
+      sign: generateSign(params as unknown as Record<string, string>, secret),
+      sign_type: "MD5",
+    };
+  }
 
   if (process.env.NODE_ENV === "development") {
     console.log("LDC 支付表单数据:", {
       actionUrl: `${gateway}/pay/submit.php`,
-      params: formParams,
+      protocol,
+      orderId,
+      amount: normalizedAmount,
     });
   }
 
@@ -234,50 +161,44 @@ export function createPayment(
  * 支持通过 LDC_PROXY_URL 代理请求
  */
 export async function queryPaymentOrder(input: {
-  outTradeNo?: string;
-  tradeNo?: string;
+  outTradeNo: string;
 }): Promise<OrderQueryResult | null> {
-  const pid = process.env.LDC_CLIENT_ID;
-  const secret = process.env.LDC_CLIENT_SECRET;
+  const { clientId: pid, secret } = getCredentials();
 
-  if (!pid || !secret) {
-    throw new Error("支付配置未设置");
+  if (!input.outTradeNo) {
+    throw new LdcPaymentError("INVALID_INPUT", "查询订单缺少 outTradeNo");
   }
 
-  if (!input.outTradeNo && !input.tradeNo) {
-    throw new Error("查询订单缺少 outTradeNo 或 tradeNo");
-  }
-
-  const apiUrl = getApiUrl();
+  const apiUrl = getQueryApiUrl();
   const searchParams = new URLSearchParams({
     act: "order",
     pid,
     key: secret,
   });
 
-  // 文档：out_trade_no 必填；trade_no 为兼容字段。
-  if (input.outTradeNo) {
-    searchParams.set("out_trade_no", input.outTradeNo);
-  } else if (input.tradeNo) {
-    searchParams.set("trade_no", input.tradeNo);
-  }
+  searchParams.set("out_trade_no", input.outTradeNo);
 
   const url = `${apiUrl}?${searchParams}`;
   console.log("LDC 订单查询请求:", url.replace(secret, "***"));
 
-  const signal =
-    typeof AbortSignal !== "undefined" &&
-    typeof (AbortSignal as unknown as { timeout?: unknown }).timeout === "function"
-      ? (AbortSignal as unknown as { timeout: (ms: number) => AbortSignal }).timeout(10_000)
-      : undefined;
-
-  const response = await fetch(url, {
-    signal,
-    headers: {
-      "Accept": "application/json",
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      signal: createTimeoutSignal(),
+      headers: {
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      },
+    });
+  } catch (error) {
+    if (isTimeoutError(error)) {
+      throw new LdcPaymentError("TIMEOUT", "支付平台订单查询请求超时", {
+        cause: error,
+        retryable: true,
+      });
+    }
+    throw error;
+  }
 
   const text = await response.text();
 
@@ -289,9 +210,16 @@ export async function queryPaymentOrder(input: {
   const contentType = response.headers.get("content-type") || "";
   if (!contentType.includes("application/json")) {
     if (isLikelyCloudflareBlock(text)) {
-      throw new Error("支付平台被 Cloudflare 拦截，请配置 LDC_PROXY_URL 环境变量使用代理");
+      throw new LdcPaymentError(
+        "BLOCKED",
+        "支付平台被 Cloudflare 拦截，请配置 LDC_PROXY_URL 环境变量使用代理",
+        { retryable: true }
+      );
     }
-    throw new Error("支付平台返回格式异常，请检查订单查询接口配置");
+    throw new LdcPaymentError(
+      "INVALID_RESPONSE",
+      "支付平台返回格式异常，请检查订单查询接口配置"
+    );
   }
 
   try {
@@ -304,16 +232,21 @@ export async function queryPaymentOrder(input: {
     const code = Number(raw.code);
     if (code !== 1) {
       if (code === -1) return null;
-      throw new Error(raw.msg || "查询订单失败");
+      throw new LdcPaymentError(
+        "PLATFORM_REJECTED",
+        raw.msg || "查询订单失败"
+      );
     }
 
-    // 兼容后端返回字符串数值（例如 '1'）。
-    const status = Number(raw.status);
-    return {
-      ...(raw as OrderQueryResult),
-      code,
-      status,
-    };
+    const result = orderQueryResultSchema.safeParse(raw);
+    if (!result.success) {
+      throw new LdcPaymentError(
+        "INVALID_RESPONSE",
+        "支付平台订单查询响应格式异常"
+      );
+    }
+
+    return result.data;
   } catch (e) {
     console.error("订单查询响应解析失败:", text.substring(0, 200));
     throw e;
@@ -329,15 +262,24 @@ export async function queryPaymentOrder(input: {
 export async function refundOrder(
   tradeNo: string,
   money: string
-): Promise<{ code: number; msg: string }> {
-  const pid = process.env.LDC_CLIENT_ID;
-  const secret = process.env.LDC_CLIENT_SECRET;
-
-  if (!pid || !secret) {
-    throw new Error("支付配置未设置");
+): Promise<RefundResult> {
+  const refundMode = getRefundMode();
+  if (refundMode === "disabled") {
+    throw new LdcPaymentError("CONFIG", "退款功能未启用");
+  }
+  if (!tradeNo.trim()) {
+    throw new LdcPaymentError("INVALID_INPUT", "退款缺少支付平台流水号");
+  }
+  const refundCents = parseMoneyToCents(money);
+  if (!/^\d+\.\d{2}$/.test(money) || refundCents === null || refundCents <= 0) {
+    throw new LdcPaymentError(
+      "INVALID_INPUT",
+      "退款金额必须是大于 0 的两位小数字符串"
+    );
   }
 
-  const apiUrl = getApiUrl();
+  const { clientId: pid, secret } = getCredentials();
+  const apiUrl = getRefundApiUrl(refundMode);
   const body = new URLSearchParams({
     pid,
     key: secret,
@@ -347,82 +289,71 @@ export async function refundOrder(
 
   console.log("LDC 退款请求:", apiUrl, "参数:", { pid, trade_no: tradeNo, money });
 
-  const response = await fetch(apiUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      "Accept": "application/json",
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    },
-    body: body.toString(),
-  });
+  let response: Response;
+  try {
+    response = await fetch(apiUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      },
+      body: body.toString(),
+      signal: createTimeoutSignal(),
+    });
+  } catch (error) {
+    if (isTimeoutError(error)) {
+      throw new LdcPaymentError("TIMEOUT", "支付平台退款请求超时", {
+        cause: error,
+        retryable: true,
+      });
+    }
+    throw error;
+  }
 
   // 检查响应内容类型
   const contentType = response.headers.get("content-type");
   const text = await response.text();
 
   console.log("LDC 退款响应状态:", response.status, "类型:", contentType);
-  console.log("LDC 退款响应内容:", text.substring(0, 500));
 
   // 如果不是 JSON 响应，抛出友好错误
   if (!contentType?.includes("application/json")) {
     console.error("退款接口返回非 JSON 响应:", text.substring(0, 500));
     
     // 检查是否是 Cloudflare 拦截
-    if (text.includes("Just a moment") || text.includes("cloudflare")) {
-      throw new Error("支付平台被 Cloudflare 拦截，请配置 LDC_PROXY_URL 环境变量使用代理");
+    if (isLikelyCloudflareBlock(text)) {
+      throw new LdcPaymentError(
+        "BLOCKED",
+        "支付平台被 Cloudflare 拦截，请配置 LDC_PROXY_URL 环境变量使用代理",
+        { retryable: true }
+      );
     }
     
-    throw new Error("支付平台返回格式异常，请检查退款接口配置");
+    throw new LdcPaymentError(
+      "INVALID_RESPONSE",
+      "支付平台返回格式异常，请检查退款接口配置"
+    );
   }
 
   try {
-    return JSON.parse(text);
-  } catch {
+    const result = refundResultSchema.safeParse(JSON.parse(text));
+    if (!result.success) {
+      throw new LdcPaymentError(
+        "INVALID_RESPONSE",
+        "支付平台退款响应格式异常"
+      );
+    }
+    return result.data;
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("响应格式异常")) {
+      throw error;
+    }
     console.error("退款接口 JSON 解析失败:", text.substring(0, 500));
-    throw new Error("支付平台响应解析失败");
+    throw new LdcPaymentError(
+      "INVALID_RESPONSE",
+      "支付平台响应解析失败",
+      { cause: error }
+    );
   }
 }
-
-/**
- * 客户端退款所需的参数
- */
-export interface ClientRefundParams {
-  apiUrl: string;
-  pid: string;
-  key: string;
-  trade_no: string;
-  money: string;
-}
-
-/**
- * 生成客户端退款所需的参数
- * 这些参数将传递给前端，由浏览器直接调用 LDC API（可通过 CF 挑战）
- */
-export function getClientRefundParams(
-  tradeNo: string,
-  money: string
-): ClientRefundParams {
-  const pid = process.env.LDC_CLIENT_ID;
-  const secret = process.env.LDC_CLIENT_SECRET;
-
-  if (!pid || !secret) {
-    throw new Error("支付配置未设置：请在 .env 文件中配置 LDC_CLIENT_ID 和 LDC_CLIENT_SECRET");
-  }
-
-  let gateway = process.env.LDC_GATEWAY || "https://credit.linux.do/epay";
-  gateway = gateway.replace(/\/+$/, "");
-  if (!gateway.includes("/epay")) {
-    gateway = gateway + "/epay";
-  }
-
-  return {
-    apiUrl: `${gateway}/api.php`,
-    pid,
-    key: secret,
-    trade_no: tradeNo,
-    money,
-  };
-}
-
-export type { PaymentParams, NotifyParams, OrderQueryResult };

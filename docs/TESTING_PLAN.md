@@ -52,8 +52,8 @@
 
 - [x] 6.1 Payment Notification Route（`tests/integration/payment-notify.test.ts`）
   - 覆盖：缺参/验签失败/pid 不匹配/金额不匹配/幂等/`TRADE_SUCCESS` 分支。
-- [x] 6.2 Payment Refund Logic（Proxy/Client Modes）（`tests/integration/refund.test.ts`）
-  - 覆盖：`getRefundMode/isRefundEnabled`；`refundOrder`（proxy/gateway）；`getClientRefundParams`。
+- [x] 6.2 Payment Refund Logic（Server/Proxy Modes）（`tests/integration/refund.test.ts`）
+  - 覆盖：默认禁用与严格模式校验、HTTPS 代理、服务端直连、超时、响应 Schema；客户端凭证路径已删除。
 
 ## 7. Component Tests
 

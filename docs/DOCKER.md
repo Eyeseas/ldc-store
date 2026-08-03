@@ -89,6 +89,10 @@ ADMIN_PASSWORD=your-secure-admin-password
 # 在 https://credit.linux.do 创建应用后获取
 LDC_CLIENT_ID=your-ldc-client-id
 LDC_CLIENT_SECRET=your-ldc-client-secret
+LDC_PAYMENT_PROTOCOL=epay
+# ldcpay 模式必填，使用 pnpm ldc:keygen 生成
+# LDC_ED25519_PRIVATE_KEY_PKCS8_BASE64=your-pkcs8-private-key-base64
+LDC_REFUND_MODE=disabled
 
 # ============================================
 # Linux DO OAuth2 登录配置（必填）
@@ -153,7 +157,10 @@ docker compose exec -T db psql -U postgres -d ldc_store -c "\dt"
 | `NEXT_PUBLIC_SITE_DESCRIPTION` | - | 网站描述 |
 | `ORDER_EXPIRE_MINUTES` | `5` | 订单过期时间（分钟） |
 | `STATS_TIMEZONE` | `Asia/Shanghai` | 统计口径时区 |
-| `LDC_REFUND_MODE` | `client` | 退款模式：`client`/`proxy`/`disabled` |
+| `LDC_PAYMENT_PROTOCOL` | `epay` | 支付协议：`epay`/`ldcpay` |
+| `LDC_ED25519_PRIVATE_KEY_PKCS8_BASE64` | - | `ldcpay` 使用的服务端 PKCS#8 私钥 |
+| `LDC_REFUND_MODE` | `disabled` | 退款模式：`server`/`proxy`/`disabled` |
+| `LDC_PROXY_URL` | - | `proxy` 模式使用的可信 HTTPS API 地址 |
 
 ### 密钥生成
 
@@ -162,6 +169,14 @@ docker compose exec -T db psql -U postgres -d ldc_store -c "\dt"
 ```bash
 openssl rand -base64 32
 ```
+
+生成 `ldcpay` Ed25519 密钥对：
+
+```bash
+pnpm ldc:keygen
+```
+
+将输出的公钥上传 Linux DO Credit 控制台，私钥仅写入 `.env.docker` 或部署平台密钥。不要把输出提交到 Git。
 
 ---
 

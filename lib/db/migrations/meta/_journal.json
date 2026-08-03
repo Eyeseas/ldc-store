@@ -43,6 +43,20 @@
       "when": 1772345274616,
       "tag": "0005_chilly_mister_fear",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1785689281525,
+      "tag": "0006_smooth_doctor_octopus",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1785690506434,
+      "tag": "0007_mute_raider",
+      "breakpoints": true
     }
   ]
 }

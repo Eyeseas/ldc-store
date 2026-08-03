@@ -16,7 +16,7 @@
  *
  * @returns 解析失败返回 null
  */
-export function parseWalletAmount(value: string): number | null {
+export function parseMoneyToCents(value: string): number | null {
   const raw = value.trim();
   if (!raw) return null;
 
@@ -24,10 +24,33 @@ export function parseWalletAmount(value: string): number | null {
   const withThousands = /^\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?$/.test(raw);
   if (!plain && !withThousands) return null;
 
-  const normalized = raw.replace(/,/g, "");
-  const amount = Number(normalized);
-  if (!Number.isFinite(amount)) return null;
-  if (amount < 0) return null;
-  return amount;
+  const [whole, fraction = ""] = raw.replace(/,/g, "").split(".");
+  const wholeAmount = Number(whole);
+  const fractionAmount = Number(fraction.padEnd(2, "0"));
+  if (!Number.isSafeInteger(wholeAmount)) return null;
+
+  const cents = wholeAmount * 100 + fractionAmount;
+  return Number.isSafeInteger(cents) ? cents : null;
 }
 
+export function formatCents(cents: number): string | null {
+  if (!Number.isSafeInteger(cents) || cents < 0) return null;
+  const whole = Math.floor(cents / 100);
+  const fraction = String(cents % 100).padStart(2, "0");
+  return `${whole}.${fraction}`;
+}
+
+export function multiplyMoney(value: string, quantity: number): string | null {
+  const unitCents = parseMoneyToCents(value);
+  if (unitCents === null || !Number.isSafeInteger(quantity) || quantity <= 0) {
+    return null;
+  }
+
+  const totalCents = unitCents * quantity;
+  return Number.isSafeInteger(totalCents) ? formatCents(totalCents) : null;
+}
+
+export function parseWalletAmount(value: string): number | null {
+  const cents = parseMoneyToCents(value);
+  return cents === null ? null : cents / 100;
+}

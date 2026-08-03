@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build && pnpm security:scan-client",
     "start": "next start",
     "lint": "eslint",
     "db:generate": "drizzle-kit generate",
@@ -14,6 +14,8 @@
     "db:seed": "tsx lib/db/seed.ts",
     "db:baseline": "tsx lib/db/baseline.ts",
     "db:reset": "tsx lib/db/reset.ts",
+    "ldc:keygen": "tsx scripts/generate-ldc-key.ts",
+    "security:scan-client": "node scripts/check-client-secrets.mjs",
     "test": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:ui": "vitest --ui"

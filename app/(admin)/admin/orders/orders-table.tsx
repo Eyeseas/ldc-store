@@ -26,7 +26,6 @@ import {
 } from "@/components/ui/table";
 import { LocalTime } from "@/components/time/local-time";
 
-import type { RefundMode } from "@/lib/payment/ldc";
 import { deleteAdminOrders, type AdminOrderListItem } from "@/lib/actions/admin-orders";
 
 import { orderStatusConfig, paymentMethodLabels } from "./order-meta";
@@ -237,7 +236,6 @@ function OrdersBulkDeleteDialog({
 function OrdersTableView({
   items,
   refundEnabled,
-  refundMode,
   selectedIds,
   selectAllRef,
   allOnPageSelected,
@@ -246,7 +244,6 @@ function OrdersTableView({
 }: {
   items: AdminOrderListItem[];
   refundEnabled: boolean;
-  refundMode: RefundMode;
   selectedIds: Set<string>;
   selectAllRef: RefObject<HTMLInputElement | null>;
   allOnPageSelected: boolean;
@@ -312,7 +309,6 @@ function OrdersTableView({
                     status={order.status}
                     refundReason={order.refundReason}
                     refundEnabled={refundEnabled}
-                    refundMode={refundMode}
                   />
                 </TableCell>
               </TableRow>
@@ -327,11 +323,9 @@ function OrdersTableView({
 export function OrdersTable({
   items,
   refundEnabled,
-  refundMode,
 }: {
   items: AdminOrderListItem[];
   refundEnabled: boolean;
-  refundMode: RefundMode;
 }) {
   const router = useRouter();
   const [isDeleting, startDeleting] = useTransition();
@@ -400,7 +394,6 @@ export function OrdersTable({
       <OrdersTableView
         items={items}
         refundEnabled={refundEnabled}
-        refundMode={refundMode}
         selectedIds={selectedIds}
         selectAllRef={selectAllRef}
         allOnPageSelected={selection.allOnPageSelected}

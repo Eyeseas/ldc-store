@@ -38,8 +38,18 @@ ADMIN_USERNAMES=""
 LDC_CLIENT_ID="your_client_id"
 LDC_CLIENT_SECRET="your_client_secret"
 
+# 支付协议: epay (默认) / ldcpay (原生 Ed25519)
+LDC_PAYMENT_PROTOCOL="epay"
+# ldcpay 模式必填，运行 pnpm ldc:keygen 生成
+# LDC_ED25519_PRIVATE_KEY_PKCS8_BASE64="your_pkcs8_private_key_base64"
+
 # 支付网关地址 (一般无需修改)
 LDC_GATEWAY="https://credit.linux.do/epay"
+
+# 退款模式: server / proxy / disabled (默认)
+LDC_REFUND_MODE="disabled"
+# proxy 模式必须配置可信 HTTPS 地址
+# LDC_PROXY_URL="https://your-proxy-domain.com/api.php"
 
 # ============================================
 # Linux DO OAuth2 登录配置 (必填)
